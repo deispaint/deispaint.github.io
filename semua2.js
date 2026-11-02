@@ -1399,32 +1399,40 @@ Modul.extend(MediaEngine, "media-record-mic.js", {
 
 /*
   media-extract.js
-  TUGAS     : ambil audio dari file video: coba cara bawaan browser dulu, lalu FFmpeg; toast progres
+  TUGAS     : ambil audio dari file video SEPENUHNYA OFFLINE (tanpa internet, tanpa library luar)
   BAGIAN DARI: MediaEngine
   DIPANGGIL OLEH: media-import-video.js (extractAudioFromVideoFile, _showExtractToast)
-  MEMANGGIL : media-extract-wav (_audioBufferToWavBlob), media-extract-ffmpeg (_extractAudioFFmpeg)
+  MEMANGGIL : media-extract-wav (_audioBufferToWavBlob)
   EVENT     : tidak ada
   KALAU RUSAK: Audio dari video gagal diambil / toast tersangkut
+
+  Urutan cara (otomatis pindah ke cara berikutnya kalau gagal):
+   1. Web Audio bawaan browser (cepat, tapi memuat seluruh file ke memori -> hanya untuk file <= 60 MB)
+   2. Bongkar MP4/MOV sendiri + AudioDecoder (hemat memori: file dibaca per potongan, video panjang aman)
+   3. Putar video di belakang layar lalu rekam suaranya (butuh waktu sepanjang durasi, tapi format apa pun yang bisa diputar)
 */
 Modul.extend(MediaEngine, "media-extract.js", {
-  async extractAudioFromVideoFile(file) {
-    // Jalur 1: native (offline, tanpa internet) pakai Web Audio API bawaan browser.
-    try {
-      return await this._extractAudioNative(file);
-    } catch (nativeErr) {
-      console.warn("Extract audio native gagal, coba fallback FFmpeg:", nativeErr);
-      if (typeof navigator !== "undefined" && navigator.onLine === false) {
-        throw new Error("Browser gak bisa baca audio video ini langsung, dan lagi offline. Coba video MP4 (audio AAC), atau sambungkan internet lalu coba lagi.");
-      }
+  async extractAudioFromVideoFile(file, onProgress) {
+    const errors = [];
+    if (file.size <= 60 * 1024 * 1024) {
+      try { return await this._extractAudioNative(file); }
+      catch (e) { errors.push("bawaan browser: " + (e && e.message || e)); }
     }
-    // Jalur 2: fallback FFmpeg (butuh internet buat download library pertama kali).
-    return await this._extractAudioFFmpeg(file);
+    try { return await this._extractAudioMp4(file, onProgress); }
+    catch (e) {
+      // Video MP4 yang memang tidak punya suara: jangan lanjut merekam (nanti hasilnya audio kosong).
+      if (e && e.noAudio) throw new Error("Video ini tidak punya jalur audio (tidak ada suaranya).");
+      errors.push("MP4: " + (e && e.message || e));
+    }
+    try { return await this._extractAudioRealtime(file, onProgress); }
+    catch (e) { errors.push("rekam: " + (e && e.message || e)); }
+    throw new Error("Semua cara gagal.\n" + errors.join("\n"));
   },
+
+  // ---------- Cara 1: Web Audio ----------
   async _extractAudioNative(file) {
     const AudioCtxClass = window.AudioContext || window.webkitAudioContext;
-    if (!AudioCtxClass) {
-      throw new Error("Browser ini gak dukung Web Audio API");
-    }
+    if (!AudioCtxClass) throw new Error("Browser ini gak dukung Web Audio API");
     const arrayBuffer = await file.arrayBuffer();
     const ctx = new AudioCtxClass();
     let audioBuffer;
@@ -1433,19 +1441,267 @@ Modul.extend(MediaEngine, "media-extract.js", {
     } finally {
       try { ctx.close(); } catch (e) {}
     }
-    if (!audioBuffer || audioBuffer.length === 0) {
-      throw new Error("Video ini kemungkinan gak punya jalur audio");
-    }
+    if (!audioBuffer || audioBuffer.length === 0) throw new Error("Video ini kemungkinan gak punya jalur audio");
     const blob = this._audioBufferToWavBlob(audioBuffer);
-    if (blob.size === 0) {
-      throw new Error("Hasil extract kosong -- video ini kemungkinan gak punya suara");
-    }
+    if (blob.size === 0) throw new Error("Hasil extract kosong -- video ini kemungkinan gak punya suara");
     return { blob, duration: audioBuffer.duration };
+  },
+
+  // ---------- Cara 2: bongkar MP4/MOV + AudioDecoder ----------
+  async _mp4Read(file, pos, len) {
+    return new DataView(await file.slice(pos, pos + len).arrayBuffer());
+  },
+
+  // Cari box di dalam rentang [start,end) -> daftar {type, start, hdr, size}
+  async _mp4Boxes(file, start, end) {
+    const out = [];
+    let p = start;
+    while (p + 8 <= end) {
+      const dv = await this._mp4Read(file, p, 16);
+      let size = dv.getUint32(0);
+      const type = String.fromCharCode(dv.getUint8(4), dv.getUint8(5), dv.getUint8(6), dv.getUint8(7));
+      let hdr = 8;
+      if (size === 1) { size = dv.getUint32(8) * 4294967296 + dv.getUint32(12); hdr = 16; }
+      else if (size === 0) size = end - p;
+      if (size < hdr) break;
+      out.push({ type, start: p, hdr, size });
+      p += size;
+    }
+    return out;
+  },
+
+  // Parse box kecil yang sudah ada di memori (buffer u8), rekursif ke kontainer.
+  _mp4Parse(u8, start, end, out) {
+    const dv = new DataView(u8.buffer, u8.byteOffset, u8.byteLength);
+    let p = start;
+    while (p + 8 <= end) {
+      let size = dv.getUint32(p);
+      const type = String.fromCharCode(u8[p + 4], u8[p + 5], u8[p + 6], u8[p + 7]);
+      let hdr = 8;
+      if (size === 1) { size = dv.getUint32(p + 8) * 4294967296 + dv.getUint32(p + 12); hdr = 16; }
+      else if (size === 0) size = end - p;
+      if (size < hdr || p + size > end) break;
+      out.push({ type, start: p, hdr, end: p + size });
+      p += size;
+    }
+    return out;
+  },
+  _mp4Find(u8, parent, type) {
+    const list = this._mp4Parse(u8, parent.start + parent.hdr, parent.end, []);
+    return list.find(b => b.type === type) || null;
+  },
+  _mp4All(u8, parent, type) {
+    return this._mp4Parse(u8, parent.start + parent.hdr, parent.end, []).filter(b => b.type === type);
+  },
+
+  async _extractAudioMp4(file, onProgress) {
+    if (typeof AudioDecoder === "undefined") throw new Error("AudioDecoder tidak tersedia");
+    const top = await this._mp4Boxes(file, 0, file.size);
+    const moovBox = top.find(b => b.type === "moov");
+    if (!moovBox) throw new Error("bukan MP4/MOV (box moov tidak ada)");
+    if (moovBox.size > 200 * 1024 * 1024) throw new Error("moov terlalu besar");
+    const u8 = new Uint8Array(await file.slice(moovBox.start, moovBox.start + moovBox.size).arrayBuffer());
+    const dv = new DataView(u8.buffer);
+    const moov = { start: 0, hdr: moovBox.hdr, end: u8.length };
+
+    // Cari trak audio
+    let trak = null, mdhd = null, stbl = null;
+    for (const t of this._mp4All(u8, moov, "trak")) {
+      const mdia = this._mp4Find(u8, t, "mdia"); if (!mdia) continue;
+      const hdlr = this._mp4Find(u8, mdia, "hdlr"); if (!hdlr) continue;
+      const handler = String.fromCharCode(u8[hdlr.start + hdlr.hdr + 8], u8[hdlr.start + hdlr.hdr + 9], u8[hdlr.start + hdlr.hdr + 10], u8[hdlr.start + hdlr.hdr + 11]);
+      if (handler !== "soun") continue;
+      const minf = this._mp4Find(u8, mdia, "minf");
+      const st = minf && this._mp4Find(u8, minf, "stbl");
+      if (!st) continue;
+      trak = t; mdhd = this._mp4Find(u8, mdia, "mdhd"); stbl = st; break;
+    }
+    if (!trak) { const ne = new Error("video ini tidak punya jalur audio"); ne.noAudio = true; throw ne; }
+    const ver = u8[mdhd.start + mdhd.hdr];
+    const timescale = ver === 1 ? dv.getUint32(mdhd.start + mdhd.hdr + 20) : dv.getUint32(mdhd.start + mdhd.hdr + 12);
+
+    // Konfigurasi codec dari stsd
+    const stsd = this._mp4Find(u8, stbl, "stsd");
+    const entryStart = stsd.start + stsd.hdr + 8; // lewati versi/flag + jumlah entri
+    const entrySize = dv.getUint32(entryStart);
+    const entryType = String.fromCharCode(u8[entryStart + 4], u8[entryStart + 5], u8[entryStart + 6], u8[entryStart + 7]);
+    let channels = dv.getUint16(entryStart + 8 + 16);
+    let sampleRate = dv.getUint32(entryStart + 8 + 24) / 65536;
+    const children = this._mp4Parse(u8, entryStart + 8 + 28, entryStart + entrySize, []);
+    let config;
+    if (entryType === "mp4a") {
+      const esds = children.find(b => b.type === "esds");
+      if (!esds) throw new Error("esds tidak ada");
+      // Cari DecoderSpecificInfo (tag 0x05)
+      let p = esds.start + esds.hdr + 4, asc = null;
+      const endE = esds.end;
+      while (p < endE - 2) {
+        const tag = u8[p++]; let len = 0, b;
+        do { b = u8[p++]; len = (len << 7) | (b & 0x7f); } while (b & 0x80 && p < endE);
+        if (tag === 0x05) { asc = u8.slice(p, p + len); break; }
+        if (tag === 0x03) p += 3; else if (tag === 0x04) p += 13; // masuk ke dalam descriptor
+        else p += len;
+      }
+      if (!asc || asc.length < 2) throw new Error("AudioSpecificConfig tidak ketemu");
+      const aot = asc[0] >> 3;
+      const sfIdx = ((asc[0] & 7) << 1) | (asc[1] >> 7);
+      const chCfg = (asc[1] >> 3) & 15;
+      const rates = [96000, 88200, 64000, 48000, 44100, 32000, 24000, 22050, 16000, 12000, 11025, 8000, 7350];
+      if (rates[sfIdx]) sampleRate = rates[sfIdx];
+      if (chCfg) channels = chCfg;
+      config = { codec: "mp4a.40." + aot, sampleRate, numberOfChannels: channels, description: asc };
+    } else if (entryType === "Opus") {
+      const dops = children.find(b => b.type === "dOps");
+      if (!dops) throw new Error("dOps tidak ada");
+      const q = dops.start + dops.hdr;
+      const head = new Uint8Array(19);
+      head.set([0x4f, 0x70, 0x75, 0x73, 0x48, 0x65, 0x61, 0x64], 0); head[8] = 1;
+      head[9] = u8[q + 1];
+      head[10] = u8[q + 3]; head[11] = u8[q + 2];                       // pre-skip (BE -> LE)
+      const sr = dv.getUint32(q + 4);
+      new DataView(head.buffer).setUint32(12, sr, true);
+      head[16] = u8[q + 9]; head[17] = u8[q + 8];                       // gain
+      head[18] = u8[q + 10];
+      if (head[18] !== 0) throw new Error("Opus multichannel belum didukung");
+      channels = head[9]; sampleRate = 48000;
+      config = { codec: "opus", sampleRate: 48000, numberOfChannels: channels, description: head };
+    } else {
+      throw new Error("codec audio '" + entryType + "' tidak didukung");
+    }
+    const sup = await AudioDecoder.isConfigSupported(config);
+    if (!sup || !sup.supported) throw new Error("browser tidak bisa decode " + config.codec);
+
+    // Tabel sampel
+    const readTable = (type) => { const b = this._mp4Find(u8, stbl, type); return b; };
+    const stsz = readTable("stsz"), stco = readTable("stco") || readTable("co64"), stsc = readTable("stsc"), stts = readTable("stts");
+    if (!stsz || !stco || !stsc || !stts) throw new Error("tabel sampel tidak lengkap");
+    const is64 = stco.type === "co64";
+    const sz0 = stsz.start + stsz.hdr + 4;
+    const fixed = dv.getUint32(sz0), nSamples = dv.getUint32(sz0 + 4);
+    const sizes = new Uint32Array(nSamples);
+    for (let i = 0; i < nSamples; i++) sizes[i] = fixed || dv.getUint32(sz0 + 8 + i * 4);
+    const nChunks = dv.getUint32(stco.start + stco.hdr + 4);
+    const chunkOffsets = new Array(nChunks);
+    for (let i = 0; i < nChunks; i++) {
+      const q = stco.start + stco.hdr + 8 + i * (is64 ? 8 : 4);
+      chunkOffsets[i] = is64 ? dv.getUint32(q) * 4294967296 + dv.getUint32(q + 4) : dv.getUint32(q);
+    }
+    const nsc = dv.getUint32(stsc.start + stsc.hdr + 4);
+    const stscE = [];
+    for (let i = 0; i < nsc; i++) { const q = stsc.start + stsc.hdr + 8 + i * 12; stscE.push({ first: dv.getUint32(q), per: dv.getUint32(q + 4) }); }
+    const nst = dv.getUint32(stts.start + stts.hdr + 4);
+    const durs = new Uint32Array(nSamples);
+    let si = 0;
+    for (let i = 0; i < nst && si < nSamples; i++) {
+      const q = stts.start + stts.hdr + 8 + i * 8;
+      const cnt = dv.getUint32(q), d = dv.getUint32(q + 4);
+      for (let k = 0; k < cnt && si < nSamples; k++) durs[si++] = d;
+    }
+    // Offset tiap sampel
+    const offsets = new Array(nSamples);
+    let s = 0;
+    for (let c = 0; c < nChunks && s < nSamples; c++) {
+      let per = stscE[0].per;
+      for (let e = 0; e < stscE.length; e++) if (stscE[e].first <= c + 1) per = stscE[e].per;
+      let off = chunkOffsets[c];
+      for (let k = 0; k < per && s < nSamples; k++) { offsets[s] = off; off += sizes[s]; s++; }
+    }
+
+    // Decoder -> kumpulkan PCM 16-bit
+    const outCh = Math.min(2, channels);
+    const pcm = [];
+    let totalFrames = 0, outRate = sampleRate, derr = null;
+    const dec = new AudioDecoder({
+      output: (ad) => {
+        const n = ad.numberOfFrames, nc = ad.numberOfChannels;
+        outRate = ad.sampleRate;
+        const planes = [];
+        for (let c = 0; c < nc; c++) { const f = new Float32Array(n); ad.copyTo(f, { planeIndex: c, format: "f32-planar" }); planes.push(f); }
+        ad.close();
+        const i16 = new Int16Array(n * outCh);
+        for (let i = 0; i < n; i++) for (let c = 0; c < outCh; c++) {
+          const v = Math.max(-1, Math.min(1, planes[Math.min(c, nc - 1)][i]));
+          i16[i * outCh + c] = v < 0 ? v * 32768 : v * 32767;
+        }
+        pcm.push(i16); totalFrames += n;
+      },
+      error: (e) => { derr = e; }
+    });
+    dec.configure(config);
+
+    // Baca file per rentang berurutan (~1 MB sekali baca)
+    let i = 0, t = 0;
+    while (i < nSamples) {
+      if (derr) throw derr;
+      const first = offsets[i];
+      let j = i, bytes = 0;
+      while (j < nSamples && offsets[j] === first + bytes && bytes < 1048576) { bytes += sizes[j]; j++; }
+      if (j === i) { bytes = sizes[i]; j = i + 1; }
+      const chunk = new Uint8Array(await file.slice(first, first + bytes).arrayBuffer());
+      let p = 0;
+      for (let k = i; k < j; k++) {
+        dec.decode(new EncodedAudioChunk({ type: "key", timestamp: Math.round(t / timescale * 1e6), duration: Math.round(durs[k] / timescale * 1e6), data: chunk.subarray(p, p + sizes[k]) }));
+        p += sizes[k]; t += durs[k];
+      }
+      i = j;
+      while (dec.decodeQueueSize > 20) await new Promise(r => setTimeout(r, 4));
+      if (onProgress) onProgress(i / nSamples);
+    }
+    await dec.flush(); dec.close();
+    if (derr) throw derr;
+    if (!totalFrames) throw new Error("hasil decode kosong");
+
+    const dataSize = totalFrames * outCh * 2;
+    const header = new ArrayBuffer(44), hv = new DataView(header);
+    const w = (o, str) => { for (let k = 0; k < str.length; k++) hv.setUint8(o + k, str.charCodeAt(k)); };
+    w(0, "RIFF"); hv.setUint32(4, 36 + dataSize, true); w(8, "WAVE"); w(12, "fmt ");
+    hv.setUint32(16, 16, true); hv.setUint16(20, 1, true); hv.setUint16(22, outCh, true);
+    hv.setUint32(24, outRate, true); hv.setUint32(28, outRate * outCh * 2, true);
+    hv.setUint16(32, outCh * 2, true); hv.setUint16(34, 16, true); w(36, "data"); hv.setUint32(40, dataSize, true);
+    return { blob: new Blob([header, ...pcm], { type: "audio/wav" }), duration: totalFrames / outRate };
+  },
+
+  // ---------- Cara 3: putar di belakang layar lalu rekam ----------
+  async _extractAudioRealtime(file, onProgress) {
+    if (!window.MediaRecorder) throw new Error("MediaRecorder tidak tersedia");
+    const AC = window.AudioContext || window.webkitAudioContext;
+    if (!AC) throw new Error("Web Audio tidak tersedia");
+    const url = URL.createObjectURL(file);
+    const video = document.createElement("video");
+    video.src = url; video.preload = "auto"; video.playsInline = true;
+    const ctx = new AC();
+    try {
+      await new Promise((res, rej) => { video.onloadedmetadata = res; video.onerror = () => rej(new Error("browser tidak bisa membuka video ini")); });
+      const dur = isFinite(video.duration) ? video.duration : 0;
+      const src = ctx.createMediaElementSource(video);
+      const dest = ctx.createMediaStreamDestination();
+      src.connect(dest); // tidak disambung ke speaker -> senyap
+      if (ctx.state !== "running") await ctx.resume();
+      const mimes = ["audio/webm;codecs=opus", "audio/webm", "audio/mp4"];
+      const mime = mimes.find(m => MediaRecorder.isTypeSupported(m));
+      const rec = new MediaRecorder(dest.stream, mime ? { mimeType: mime } : undefined);
+      const chunks = [];
+      rec.ondataavailable = (e) => { if (e.data && e.data.size) chunks.push(e.data); };
+      const stopped = new Promise(r => { rec.onstop = r; });
+      const ended = new Promise((r, rej) => { video.onended = r; video.onerror = () => rej(new Error("video berhenti karena error")); });
+      rec.start(1000);
+      await video.play();
+      const tick = setInterval(() => { if (onProgress && dur) onProgress(video.currentTime / dur); }, 500);
+      await ended;
+      clearInterval(tick);
+      rec.stop(); await stopped;
+      const blob = new Blob(chunks, { type: rec.mimeType || "audio/webm" });
+      if (blob.size < 200) throw new Error("hasil rekam kosong (video mungkin tanpa suara)");
+      return { blob, duration: dur };
+    } finally {
+      try { ctx.close(); } catch (e) {}
+      URL.revokeObjectURL(url);
+    }
   },
 
   _showExtractToast(name) {
     const el = document.createElement("div");
-    el.textContent = `Lagi ambil audio dari "${name}"... (pertama kali bisa agak lama, lagi download library)`;
+    el.textContent = `Lagi ambil audio dari "${name}"...`;
     el.style.cssText = `
     position:fixed; left:50%; bottom:24px; transform:translateX(-50%);
     background:rgba(0,0,0,0.8); color:#fff; padding:10px 16px;
@@ -2026,6 +2282,95 @@ Modul.extend(MediaEngine, "media-export.js", {
     });
   },
 
+  // ===== AUDIO EXPORT VERSI "DIMIX DULU" =====
+  // Dulu audio diputar real-time dari elemen <audio> sambil video direkam. Di HP, begitu
+  // prosesor sibuk (encode video), audio ikut tersendat dan loncat-loncat (kedengeran
+  // putus-putus & bergema). Sekarang semua track digabung dulu jadi SATU rekaman utuh
+  // (OfflineAudioContext, tidak real-time), lalu diputar mulus dari buffer saat merekam --
+  // sepenuhnya urusan thread audio, tidak terpengaruh seberapa sibuk layar/encoder.
+  // Balikin true kalau berhasil. Kalau gagal, pemanggil jatuh ke cara lama.
+  async prepareExportMix(project, totalSeconds, opts) {
+    try {
+      const AC = window.AudioContext || window.webkitAudioContext;
+      const OAC = window.OfflineAudioContext || window.webkitOfflineAudioContext;
+      if (!AC || !OAC) return false;
+      const tracks = (project.audioTracks || []).filter(t => t && t.dataUrl);
+      if (!tracks.length) return false;
+      const sr = (opts && opts.sampleRate) || 44100;
+      const fps = project.fps > 0 ? project.fps : 12;
+      const step = 1 / fps;
+      const steps = Math.ceil(totalSeconds * fps);
+      const off = new OAC(2, Math.max(1, Math.ceil(totalSeconds * sr)), sr);
+      let decoded = 0;
+      for (const track of tracks) {
+        let buf;
+        try {
+          const ab = await (await fetch(track.dataUrl)).arrayBuffer();
+          buf = await new OAC(2, 1, sr).decodeAudioData(ab);
+        } catch (e) { console.error("Gagal decode audio", track.name, e); continue; }
+        decoded++;
+        const gain = off.createGain();
+        gain.gain.value = 0;
+        gain.connect(off.destination);
+        const duration = this.getTimelineDuration(track);
+        const visibleFrom = track.trimIn || 0;
+        const visibleUntil = duration - (track.trimOut || 0);
+        let run = null, lastGain = -1;
+        const flush = () => {
+          if (!run) return;
+          const src = off.createBufferSource();
+          src.buffer = buf;
+          src.playbackRate.value = run.speed;
+          src.connect(gain);
+          const len = run.steps * step;
+          try { src.start(run.t, Math.max(0, Math.min(run.orig, buf.duration - 0.001)), len * run.speed); } catch (e) {}
+          run = null;
+        };
+        for (let f = 0; f < steps; f++) {
+          const t = f * step;
+          const elapsed = t - (track.startFrame || 0) / fps;
+          if (elapsed < visibleFrom || elapsed > visibleUntil) { flush(); continue; }
+          const { original, speed } = this.mapTimelineToOriginal(track, elapsed);
+          if (run && Math.abs(run.speed - speed) < 1e-6 && Math.abs(run.orig + run.steps * step * run.speed - original) < 0.03) {
+            run.steps++;
+          } else {
+            flush();
+            run = { t, orig: original, speed, steps: 1 };
+          }
+          const g = this.getTrackVolume(track) * this.getFadeGain(track, elapsed, visibleFrom, visibleUntil);
+          if (Math.abs(g - lastGain) > 0.002) { gain.gain.setValueAtTime(g, t); lastGain = g; }
+        }
+        flush();
+      }
+      if (!decoded) return false;
+      const mixed = await off.startRendering();
+      if (opts && opts.bufferOnly) return mixed; // dipakai encoder WebCodecs: cukup bufernya
+      const ctx = new AC();
+      const destNode = ctx.createMediaStreamDestination();
+      this._exportAudioState = { ctx, destNode, elements: {}, gains: {}, sceneMode: false, mixBuffer: mixed, mixSource: null };
+      if (ctx.state !== "running") {
+        try { await Promise.race([ctx.resume(), new Promise(res => setTimeout(res, 1000))]); } catch (e) {}
+      }
+      if (ctx.state !== "running") { this.endExportAudio(); return false; }
+      return true;
+    } catch (err) {
+      console.error("Gagal bikin mix audio export:", err);
+      this.endExportAudio();
+      return false;
+    }
+  },
+
+  // Mulai putar hasil mix (dipanggil tepat setelah recorder.start()).
+  startExportMix() {
+    const st = this._exportAudioState;
+    if (!st || !st.mixBuffer) return;
+    const src = st.ctx.createBufferSource();
+    src.buffer = st.mixBuffer;
+    src.connect(st.destNode);
+    st.mixSource = src;
+    src.start();
+  },
+
   // Beresin elemen & AudioContext export -- WAJIB dipanggil export.js abis
   // MediaRecorder berhenti (baik export selesai normal maupun dibatalkan),
   // supaya gak ninggalin AudioContext/elemen audio nyala di background.
@@ -2036,6 +2381,7 @@ Modul.extend(MediaEngine, "media-export.js", {
       audio.pause();
       audio.src = "";
     });
+    if (state.mixSource) { try { state.mixSource.stop(); } catch (e) {} }
     state.ctx.close().catch(() => {});
     this._exportAudioState = null;
   },
@@ -2371,17 +2717,242 @@ Modul.extend(ExportEngine, "export-render.js", {
   KALAU RUSAK: Video kosong / tidak bisa diputar / tanpa suara / terlalu lambat
 */
 Modul.extend(ExportEngine, "export-video.js", {
+
+  // ================= JALUR WEBCODECS (offline) =================
+  // undefined = tidak didukung (pakai cara lama), null = dibatalkan, objek = hasil.
+  async _exportVideoFast(project, transparent) {
+    if (typeof VideoEncoder === "undefined" || typeof VideoFrame === "undefined") return undefined;
+    const fps = project.fps || 12;
+    const total = this.totalFrames(project);
+    const MAX_PIXELS = 1600 * 900;
+    const k = Math.min(1, Math.sqrt(MAX_PIXELS / (project.width * project.height)));
+    const outW = Math.max(2, Math.round(project.width * k / 2) * 2);
+    const outH = Math.max(2, Math.round(project.height * k / 2) * 2);
+    const bitrate = Math.round(Math.min(10e6, Math.max(2.5e6, outW * outH * fps * 0.3)));
+
+    // Pilih codec video yang didukung.
+    let vcfg = null, vcodecId = null;
+    for (const [codec, id] of [["vp8", "V_VP8"], ["vp09.00.10.08", "V_VP9"]]) {
+      const cfg = { codec, width: outW, height: outH, bitrate, framerate: fps };
+      try {
+        const sup = await VideoEncoder.isConfigSupported(cfg);
+        if (sup && sup.supported) { vcfg = cfg; vcodecId = id; break; }
+      } catch (e) {}
+    }
+    if (!vcfg) return undefined;
+
+    // Audio: gabungkan semua track jadi satu buffer, lalu encode Opus.
+    const sr = 48000;
+    let audioChunks = null;
+    const wantAudio = typeof MediaEngine !== "undefined" && Array.isArray(project.audioTracks) && project.audioTracks.length > 0;
+    if (wantAudio && typeof AudioEncoder !== "undefined" && typeof AudioData !== "undefined") {
+      const mix = await MediaEngine.prepareExportMix(project, total / fps, { bufferOnly: true, sampleRate: sr });
+      if (mix && mix.getChannelData) {
+        try { audioChunks = await this._encodeOpus(mix, sr); } catch (e) { console.error("Encode audio gagal:", e); }
+        if (!audioChunks) return undefined; // audio ada tapi tidak bisa diencode -> cara lama
+      }
+    }
+
+    const vchunks = [];
+    let vError = null;
+    const venc = new VideoEncoder({
+      output: (chunk) => { const d = new Uint8Array(chunk.byteLength); chunk.copyTo(d); vchunks.push({ ts: chunk.timestamp / 1000, data: d, key: chunk.type === "key" }); },
+      error: (e) => { vError = e; }
+    });
+    venc.configure(vcfg);
+
+    const exportCanvas = document.createElement("canvas");
+    exportCanvas.width = project.width;
+    exportCanvas.height = project.height;
+    const exportCtx = exportCanvas.getContext("2d");
+    const small = document.createElement("canvas");
+    small.width = outW;
+    small.height = outH;
+    const sctx = small.getContext("2d");
+    sctx.imageSmoothingQuality = "high";
+
+    const frameUs = 1e6 / fps;
+    try {
+      for (let f = 0; f < total; f++) {
+        if (this.cancelRequested) { try { venc.close(); } catch (e) {} return null; }
+        if (vError) throw vError;
+        this.setFrame(project, f);
+        await CanvasEngine.waitForLayersReady(project);
+        this.drawExportFrame(exportCtx, project, transparent);
+        sctx.fillStyle = "#fff";
+        sctx.fillRect(0, 0, outW, outH);
+        sctx.drawImage(exportCanvas, 0, 0, outW, outH);
+        const vf = new VideoFrame(small, { timestamp: Math.round(f * frameUs), duration: Math.round(frameUs) });
+        venc.encode(vf, { keyFrame: f % Math.max(1, Math.round(fps)) === 0 });
+        vf.close();
+        while (venc.encodeQueueSize > 6) await new Promise(res => setTimeout(res, 4)); // jangan numpuk di memori
+        this.setProgress(f + 1, total, `Membuat video... ${Math.round((f + 1) / total * 100)}%`);
+        if (f % 4 === 0) await new Promise(res => setTimeout(res, 0)); // kasih napas ke layar
+      }
+      await venc.flush();
+      if (vError) throw vError;
+    } finally {
+      try { venc.close(); } catch (e) {}
+    }
+    if (!vchunks.length) throw new Error("Tidak ada frame yang terencode");
+
+    const blob = this._muxWebm({
+      width: outW, height: outH, codecId: vcodecId, fps, total,
+      video: vchunks, audio: audioChunks, sampleRate: sr
+    });
+    return { blob, filename: `${this.safeFileName(project.name)}.webm`, mimeType: "video/webm" };
+  },
+
+  // Encode AudioBuffer jadi potongan Opus. Balikin array {ts(ms), data} atau null.
+  async _encodeOpus(buf, sr) {
+    const cfg = { codec: "opus", sampleRate: sr, numberOfChannels: 2, bitrate: 128000 };
+    const sup = await AudioEncoder.isConfigSupported(cfg);
+    if (!sup || !sup.supported) return null;
+    const out = [];
+    let err = null;
+    const enc = new AudioEncoder({
+      output: (chunk) => { const d = new Uint8Array(chunk.byteLength); chunk.copyTo(d); out.push({ ts: chunk.timestamp / 1000, data: d }); },
+      error: (e) => { err = e; }
+    });
+    enc.configure(cfg);
+    const L = buf.getChannelData(0);
+    const R = buf.numberOfChannels > 1 ? buf.getChannelData(1) : L;
+    const CH = 4800;
+    for (let off = 0; off < L.length; off += CH) {
+      const n = Math.min(CH, L.length - off);
+      const planar = new Float32Array(n * 2);
+      planar.set(L.subarray(off, off + n), 0);
+      planar.set(R.subarray(off, off + n), n);
+      const ad = new AudioData({ format: "f32-planar", sampleRate: sr, numberOfFrames: n, numberOfChannels: 2, timestamp: Math.round(off / sr * 1e6), data: planar });
+      enc.encode(ad);
+      ad.close();
+      while (enc.encodeQueueSize > 8) await new Promise(res => setTimeout(res, 2));
+    }
+    await enc.flush();
+    enc.close();
+    if (err) throw err;
+    return out.length ? out : null;
+  },
+
+  // Penulis WebM minimal (EBML): 1 track video + (opsional) 1 track Opus. Cluster ~2 detik, ada Cues buat seek.
+  _muxWebm(o) {
+    const cat = (arrs) => {
+      let n = 0; arrs.forEach(a => n += a.length);
+      const r = new Uint8Array(n); let p = 0;
+      arrs.forEach(a => { r.set(a, p); p += a.length; });
+      return r;
+    };
+    const size = (n) => {
+      for (let len = 1; len <= 8; len++) {
+        if (n < Math.pow(2, 7 * len) - 1) {
+          const b = new Uint8Array(len); let v = n;
+          for (let i = len - 1; i >= 0; i--) { b[i] = v % 256; v = Math.floor(v / 256); }
+          b[0] |= 1 << (8 - len);
+          return b;
+        }
+      }
+      throw new Error("elemen terlalu besar");
+    };
+    const el = (id, payload) => cat([new Uint8Array(id), size(payload.length), payload]);
+    const uint = (n, fixed) => {
+      let len = fixed || 1;
+      if (!fixed) while (n >= Math.pow(256, len)) len++;
+      const b = new Uint8Array(len); let v = n;
+      for (let i = len - 1; i >= 0; i--) { b[i] = v % 256; v = Math.floor(v / 256); }
+      return b;
+    };
+    const f64 = (x) => { const b = new Uint8Array(8); new DataView(b.buffer).setFloat64(0, x); return b; };
+    const f32 = (x) => { const b = new Uint8Array(4); new DataView(b.buffer).setFloat32(0, x); return b; };
+    const str = (s) => new TextEncoder().encode(s);
+
+    const durMs = Math.round(o.total / o.fps * 1000);
+    const ebml = el([0x1A, 0x45, 0xDF, 0xA3], cat([
+      el([0x42, 0x86], uint(1)), el([0x42, 0xF7], uint(1)), el([0x42, 0xF2], uint(4)), el([0x42, 0xF3], uint(8)),
+      el([0x42, 0x82], str("webm")), el([0x42, 0x87], uint(2)), el([0x42, 0x85], uint(2))
+    ]));
+    const info = el([0x15, 0x49, 0xA9, 0x66], cat([
+      el([0x2A, 0xD7, 0xB1], uint(1000000)), el([0x44, 0x89], f64(durMs)),
+      el([0x4D, 0x80], str("Animasi2D")), el([0x57, 0x41], str("Animasi2D"))
+    ]));
+    const videoTrack = el([0xAE], cat([
+      el([0xD7], uint(1)), el([0x73, 0xC5], uint(1)), el([0x83], uint(1)), el([0x9C], uint(0)),
+      el([0x86], str(o.codecId)), el([0x23, 0xE3, 0x83], uint(Math.round(1e9 / o.fps))),
+      el([0xE0], cat([el([0xB0], uint(o.width)), el([0xBA], uint(o.height))]))
+    ]));
+    const tracks = [videoTrack];
+    if (o.audio) {
+      const head = new Uint8Array(19);
+      head.set(str("OpusHead"), 0); head[8] = 1; head[9] = 2;
+      new DataView(head.buffer).setUint16(10, 312, true);
+      new DataView(head.buffer).setUint32(12, o.sampleRate, true);
+      tracks.push(el([0xAE], cat([
+        el([0xD7], uint(2)), el([0x73, 0xC5], uint(2)), el([0x83], uint(2)), el([0x9C], uint(0)),
+        el([0x86], str("A_OPUS")), el([0x63, 0xA2], head),
+        el([0x56, 0xAA], uint(Math.round(312 / o.sampleRate * 1e9))), el([0x56, 0xBB], uint(80000000)),
+        el([0xE1], cat([el([0xB5], f32(o.sampleRate)), el([0x9F], uint(2))]))
+      ])));
+    }
+    const tracksEl = el([0x16, 0x54, 0xAE, 0x6B], cat(tracks));
+
+    // Gabung blok video+audio berurutan waktu, bagi jadi cluster ~2 detik (mulai di keyframe).
+    const blocks = [];
+    o.video.forEach(v => blocks.push({ tr: 1, ts: Math.round(v.ts), data: v.data, key: v.key, o: 0 }));
+    if (o.audio) o.audio.forEach(a => blocks.push({ tr: 2, ts: Math.round(a.ts), data: a.data, key: true, o: 1 }));
+    blocks.sort((a, b) => a.ts - b.ts || a.o - b.o);
+    const clusters = []; // { time, parts[] }
+    let cur = null;
+    blocks.forEach(b => {
+      if (!cur || (b.tr === 1 && b.key && b.ts - cur.time >= 2000)) {
+        cur = { time: Math.max(0, b.ts), parts: [] };
+        clusters.push(cur);
+      }
+      const rel = Math.max(-32768, Math.min(32767, b.ts - cur.time));
+      const hdr = new Uint8Array([0x80 | b.tr, (rel >> 8) & 255, rel & 255, b.key ? 0x80 : 0]);
+      cur.parts.push(el([0xA3], cat([hdr, b.data])));
+    });
+    const clusterEls = clusters.map(c => el([0x1F, 0x43, 0xB6, 0x75], cat([el([0xE7], uint(c.time)), ...c.parts])));
+
+    // Cues (posisi relatif ke awal isi Segment; lebar posisi tetap 4 byte supaya ukuran Cues pasti).
+    const cuePointsFor = (base) => {
+      let pos = base;
+      const pts = clusters.map((c, i) => {
+        const cp = el([0xBB], cat([el([0xB3], uint(c.time)), el([0xB7], cat([el([0xF7], uint(1)), el([0xF1], uint(pos, 4))]))]));
+        pos += clusterEls[i].length;
+        return cp;
+      });
+      return el([0x1C, 0x53, 0xBB, 0x6B], cat(pts));
+    };
+    const fixedBefore = info.length + tracksEl.length;
+    const cuesLen = cuePointsFor(0).length;
+    const cues = cuePointsFor(fixedBefore + cuesLen);
+
+    const segPayload = cat([info, tracksEl, cues, ...clusterEls]);
+    const segment = cat([new Uint8Array([0x18, 0x53, 0x80, 0x67]), size(segPayload.length), segPayload]);
+    return new Blob([ebml, segment], { type: "video/webm" });
+  },
+
   pickVideoMime() {
     if (!window.MediaRecorder) return null;
     const candidates = [
-      "video/webm;codecs=vp9",
+      // VP8 duluan: jauh lebih ringan di HP (VP9 bikin encoder kewalahan -> video macet).
       "video/webm;codecs=vp8",
+      "video/webm;codecs=vp9",
       "video/webm"
     ];
     return candidates.find(m => MediaRecorder.isTypeSupported(m)) || null;
   },
 
   async exportVideo(project, transparent) {
+    // Jalur utama: encoder WebCodecs OFFLINE (tidak real-time, tiap frame punya cap waktu
+    // sendiri) -> HP selambat apa pun hasilnya tetap mulus. Kalau browser tidak dukung /
+    // gagal sebelum mulai, jatuh ke cara lama (MediaRecorder) di bawah.
+    try {
+      const fast = await this._exportVideoFast(project, transparent);
+      if (fast !== undefined) return fast; // hasil, atau null kalau dibatalkan
+    } catch (err) {
+      console.error("Export WebCodecs gagal, pakai cara lama:", err);
+      if (this.cancelRequested) return null;
+    }
     const mime = this.pickVideoMime();
     if (!mime) {
       alert("Browser ini tidak mendukung export Video (WebM). Coba format GIF atau PNG Sequence.");
@@ -2401,22 +2972,29 @@ Modul.extend(ExportEngine, "export-video.js", {
     // ringannya render tidak berpengaruh ke hasil.
     const frames = await this._videoPrerender(project, transparent, exportCanvas, exportCtx);
     if (!frames) return null; // dibatalkan
+    // Kanvas rekaman (sudah dikecilkan kalau proyek besar) -- yang di-encode adalah ini.
+    const recCanvas = document.createElement("canvas");
+    recCanvas.width = frames.w;
+    recCanvas.height = frames.h;
+    const recCtx = recCanvas.getContext("2d");
 
     // TAHAP 2: putar ulang frame yang sudah jadi tepat waktu (jam asli) sambil merekam.
-    const videoStream = exportCanvas.captureStream(fps);
+    const videoStream = recCanvas.captureStream(fps);
     project.currentFrame = 0;
-    const { hasMediaEngine, audioStream } = await this._videoAudio(project);
+    const { hasMediaEngine, audioStream, mixed } = await this._videoAudio(project, frames.count / fps);
+    this._mixedAudio = !!mixed;
     const combinedTracks = [...videoStream.getVideoTracks()];
     if (audioStream) combinedTracks.push(...audioStream.getAudioTracks());
     const stream = new MediaStream(combinedTracks);
 
-    const recorder = new MediaRecorder(stream, { mimeType: mime });
+    const bitrate = Math.round(Math.min(8e6, Math.max(2.5e6, frames.w * frames.h * fps * 0.25)));
+    const recorder = new MediaRecorder(stream, { mimeType: mime, videoBitsPerSecond: bitrate, audioBitsPerSecond: 128000 });
     const chunks = [];
     recorder.ondataavailable = (e) => { if (e.data && e.data.size) chunks.push(e.data); };
     const stopped = new Promise(resolve => { recorder.onstop = resolve; });
 
     try {
-      await this._videoRecord(project, recorder, frames, exportCtx, fps, hasMediaEngine);
+      await this._videoRecord(project, recorder, frames, recCtx, fps, hasMediaEngine);
     } finally {
       if (recorder.state !== "inactive") recorder.stop();
       await stopped;
@@ -2441,16 +3019,24 @@ Modul.extend(ExportEngine, "export-video.js", {
     // Kecil muat di RAM = simpan sebagai bitmap (paling cepat). Selain itu simpan PNG (hemat RAM; HP gampang kehabisan memori).
     const asBitmap = false; // selalu simpan terkompres (hemat RAM)
     const store = [];
+    // HP kewalahan nge-encode video beresolusi besar real-time. Batasi ke ~720p (sisi genap).
+    const MAX_PIXELS = 1280 * 720;
+    const k = Math.min(1, Math.sqrt(MAX_PIXELS / (project.width * project.height)));
+    const outW = Math.max(2, Math.round(project.width * k / 2) * 2);
+    const outH = Math.max(2, Math.round(project.height * k / 2) * 2);
+    const small = document.createElement("canvas");
+    small.width = outW;
+    small.height = outH;
+    const sctx = small.getContext("2d");
+    sctx.imageSmoothingQuality = "high";
     for (let f = 0; f < total; f++) {
       if (this.cancelRequested) { this._videoDispose(store); return null; }
       this.setFrame(project, f);
       await CanvasEngine.waitForLayersReady(project);
       this.drawExportFrame(exportCtx, project, transparent);
-      if (asBitmap) {
-        store.push(await createImageBitmap(exportCanvas));
-      } else {
-        store.push(await new Promise((res, rej) => exportCanvas.toBlob(b => b ? res(b) : rej(new Error("Gagal menyimpan frame")), "image/jpeg", 0.92)));
-      }
+      sctx.clearRect(0, 0, outW, outH);
+      sctx.drawImage(exportCanvas, 0, 0, outW, outH);
+      store.push(await new Promise((res, rej) => small.toBlob(b => b ? res(b) : rej(new Error("Gagal menyimpan frame")), transparent ? "image/png" : "image/jpeg", 0.92)));
       this.setProgress(f + 1, total * 2, `Membuat video... ${Math.round((f + 1) / (total * 2) * 100)}%`);
       await new Promise(res => setTimeout(res, 0)); // kasih napas ke layar
     }
@@ -2458,6 +3044,8 @@ Modul.extend(ExportEngine, "export-video.js", {
     return {
       count: total,
       asBitmap,
+      w: outW,
+      h: outH,
       // Ambil bitmap frame i. Untuk mode PNG, decode frame-frame berikutnya sekalian di belakang layar.
       async get(i) {
         if (asBitmap) return store[i];
@@ -2487,7 +3075,7 @@ Modul.extend(ExportEngine, "export-video.js", {
     const step = 1000 / fps;
     const sceneMode = this._sceneTotal > 0;
     const syncAudio = (f) => {
-      if (!hasAudio) return;
+      if (!hasAudio || this._mixedAudio) return; // audio versi mix diputar sendiri, tidak perlu disinkron per frame
       if (sceneMode) MediaEngine._syncExportAudioSec(f / fps);
       else { project.currentFrame = f; MediaEngine._syncExportAudioFrame(); }
     };
@@ -2500,6 +3088,7 @@ Modul.extend(ExportEngine, "export-video.js", {
     exportCtx.drawImage(first, 0, 0);
     if (!frames.asBitmap) frames.release(0, first); // mode bitmap: frame 0 masih dipakai di putaran pertama
     recorder.start();
+    if (hasAudio && this._mixedAudio) MediaEngine.startExportMix();
     const t0 = performance.now();
     for (let f = 0; f < total; f++) {
       if (this.cancelRequested) break;
@@ -2517,7 +3106,7 @@ Modul.extend(ExportEngine, "export-video.js", {
   },
 
   // Pasang jalur audio export kalau memungkinkan. Balikin { hasMediaEngine, audioStream }.
-  async _videoAudio(project) {
+  async _videoAudio(project, totalSeconds) {
     // FIX (Bug 29): dulu MediaRecorder cuma dikasih videoStream (dari
     // captureStream canvas) -- audio track project TIDAK PERNAH ikut
     // dimasukkan, jadi hasil video selalu bisu walau kedengeran normal pas
@@ -2536,6 +3125,10 @@ Modul.extend(ExportEngine, "export-video.js", {
     Array.isArray(project.audioTracks) && project.audioTracks.length > 0;
     let hasMediaEngine = false;
     let audioStream = null;
+    if (wantAudio && typeof MediaEngine.prepareExportMix === "function" &&
+        await MediaEngine.prepareExportMix(project, totalSeconds)) {
+      return { hasMediaEngine: true, audioStream: MediaEngine.getExportAudioStream(), mixed: true };
+    }
     if (wantAudio) {
       MediaEngine.beginExportAudio(project, this._sceneTotal > 0);
       hasMediaEngine = true;
