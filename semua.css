@@ -4227,6 +4227,11 @@ padding: 10px 16px;
   border-top: 1px solid var(--border-subtle);
   padding-top: 6px;
   justify-content: space-between;
+  flex-wrap: wrap;
+}
+
+.brushsize-taper-amount-row .brushsize-value {
+  min-width: 16px;
 }
 
 .brushsize-btn {
@@ -4321,6 +4326,18 @@ padding: 10px 16px;
   width: 100%;
   accent-color: var(--accent);
 }
+
+/* Popover Tirus & Stabilisator (dibuka dari Top Bar) */
+.brushfx-popover { z-index: var(--z-overlay); width: 220px; }
+.brushfx-title {
+  display: flex;
+  justify-content: space-between;
+  color: var(--text-primary);
+  font-size: 12px;
+}
+.brushfx-title-2 { border-top: 1px solid var(--border-subtle); padding-top: 8px; }
+.brushfx-stab-val { color: var(--text-secondary); }
+.brushfx-popover .brushsize-value { min-width: 14px; }
 
 /*
   COLORPANEL.CSS

@@ -2438,8 +2438,8 @@ Modul.extend(ExportEngine, "export-video.js", {
   async _videoPrerender(project, transparent, exportCanvas, exportCtx) {
     const total = this.totalFrames(project);
     const bytes = project.width * project.height * 4 * total;
-    // Kecil muat di RAM = simpan sebagai bitmap (paling cepat). Besar = simpan PNG (hemat RAM).
-    const asBitmap = typeof createImageBitmap === "function" && bytes <= 300 * 1024 * 1024;
+    // Kecil muat di RAM = simpan sebagai bitmap (paling cepat). Selain itu simpan PNG (hemat RAM; HP gampang kehabisan memori).
+    const asBitmap = false; // selalu simpan terkompres (hemat RAM)
     const store = [];
     for (let f = 0; f < total; f++) {
       if (this.cancelRequested) { this._videoDispose(store); return null; }
@@ -2449,14 +2449,15 @@ Modul.extend(ExportEngine, "export-video.js", {
       if (asBitmap) {
         store.push(await createImageBitmap(exportCanvas));
       } else {
-        store.push(await new Promise((res, rej) => exportCanvas.toBlob(b => b ? res(b) : rej(new Error("Gagal menyimpan frame")), "image/png")));
+        store.push(await new Promise((res, rej) => exportCanvas.toBlob(b => b ? res(b) : rej(new Error("Gagal menyimpan frame")), "image/jpeg", 0.92)));
       }
-      this.setProgress(f + 1, total, `Menyiapkan frame ${f + 1} / ${total}...`);
+      this.setProgress(f + 1, total * 2, `Membuat video... ${Math.round((f + 1) / (total * 2) * 100)}%`);
       await new Promise(res => setTimeout(res, 0)); // kasih napas ke layar
     }
     const pending = {};
     return {
       count: total,
+      asBitmap,
       // Ambil bitmap frame i. Untuk mode PNG, decode frame-frame berikutnya sekalian di belakang layar.
       async get(i) {
         if (asBitmap) return store[i];
@@ -2467,7 +2468,10 @@ Modul.extend(ExportEngine, "export-video.js", {
         delete pending[i];
         return bmp;
       },
-      release(i, bmp) { if (!asBitmap && bmp && bmp.close) bmp.close(); },
+      // Frame sudah dipakai: bebaskan memorinya langsung (jangan ditumpuk sampai akhir).
+      release(i, bmp) {
+        if (bmp && bmp.close) { bmp.close(); if (asBitmap) store[i] = null; }
+      },
       dispose: () => { this._videoDispose(store); }
     };
   },
@@ -2494,7 +2498,7 @@ Modul.extend(ExportEngine, "export-video.js", {
     // Frame pertama sudah terpasang di canvas SEBELUM rekam mulai (kalau tidak, frame terakhir sempat ikut terekam).
     const first = await frames.get(0);
     exportCtx.drawImage(first, 0, 0);
-    frames.release(0, first);
+    if (!frames.asBitmap) frames.release(0, first); // mode bitmap: frame 0 masih dipakai di putaran pertama
     recorder.start();
     const t0 = performance.now();
     for (let f = 0; f < total; f++) {
@@ -2505,7 +2509,7 @@ Modul.extend(ExportEngine, "export-video.js", {
       exportCtx.drawImage(bmp, 0, 0);
       frames.release(f, bmp);
       syncAudio(f);
-      this.setProgress(f + 1, total, `Merekam video ${f + 1} / ${total}...`);
+      this.setProgress(total + f + 1, total * 2, `Membuat video... ${Math.round((total + f + 1) / (total * 2) * 100)}%`);
     }
     // Tahan frame terakhir selama 1 frame penuh supaya durasinya pas.
     const rest = t0 + total * step - performance.now();
@@ -16336,6 +16340,72 @@ Modul.extend(TopBar, "topbar-bind-history.js", {
       const isOpen = HistoryPanel.toggle();
       e.currentTarget.classList.toggle("topbar-btn-active", isOpen);
     });
+
+    const fxBtn = document.getElementById("topbar-brushfx");
+    if (fxBtn) fxBtn.addEventListener("click", () => this._toggleBrushFx(fxBtn));
+    this._refreshBrushFxBtn();
+  },
+
+  // Tombol Tirus & Stabilisator: menyala kalau salah satunya aktif.
+  _refreshBrushFxBtn() {
+    const b = document.getElementById("topbar-brushfx");
+    if (!b) return;
+    const on = (typeof BrushLibraryEngine !== "undefined" && BrushLibraryEngine.taperEnabled)
+      || (typeof StabilizerEngine !== "undefined" && StabilizerEngine.level > 0);
+    b.classList.toggle("topbar-btn-active", !!on);
+  },
+
+  _closeBrushFx() {
+    const p = document.getElementById("brushfx-popover");
+    if (p) p.remove();
+    document.removeEventListener("click", this._brushFxOutside, true);
+  },
+
+  _toggleBrushFx(btn) {
+    if (document.getElementById("brushfx-popover")) { this._closeBrushFx(); return; }
+    const B = BrushLibraryEngine, S = StabilizerEngine;
+    const pop = document.createElement("div");
+    pop.id = "brushfx-popover";
+    pop.className = "brushsize-popover brushfx-popover";
+    pop.innerHTML = `
+      <div class="brushfx-title">Tirus</div>
+      <div class="brushsize-popover-row">
+        <button class="brushsize-stabilizer-btn brushfx-tap${B.taperStart ? " is-active" : ""}" data-taper="start">Awal</button>
+        <button class="brushsize-stabilizer-btn brushfx-tap${B.taperEnd ? " is-active" : ""}" data-taper="end">Akhir</button>
+        <input type="range" class="brushsize-slider brushfx-amt" min="1" max="10" step="1" value="${B.taperAmount}">
+        <span class="brushsize-value brushfx-amt-val">${B.taperAmount}</span>
+      </div>
+      <div class="brushfx-title brushfx-title-2">Stabilisator <span class="brushfx-stab-val">${S.level === 0 ? "OFF" : S.level}</span></div>
+      <div class="brushsize-popover-row">
+        <input type="range" class="brushsize-slider brushfx-stab" min="0" max="10" step="1" value="${S.level}">
+      </div>`;
+    document.body.appendChild(pop);
+    const r = btn.getBoundingClientRect();
+    const w = pop.offsetWidth;
+    pop.style.top = `${r.bottom + 6}px`;
+    pop.style.left = `${Math.max(8, Math.min(r.left + r.width / 2 - w / 2, window.innerWidth - w - 8))}px`;
+
+    pop.querySelectorAll(".brushfx-tap").forEach(b => b.addEventListener("click", () => {
+      const k = b.dataset.taper;
+      BrushLibraryEngine.setTaperOptions({ [k]: !(k === "start" ? BrushLibraryEngine.taperStart : BrushLibraryEngine.taperEnd) });
+      b.classList.toggle("is-active", k === "start" ? BrushLibraryEngine.taperStart : BrushLibraryEngine.taperEnd);
+      this._refreshBrushFxBtn();
+    }));
+    const amt = pop.querySelector(".brushfx-amt"), amtV = pop.querySelector(".brushfx-amt-val");
+    amt.addEventListener("input", () => { BrushLibraryEngine.setTaperOptions({ amount: +amt.value }); amtV.textContent = amt.value; });
+    const st = pop.querySelector(".brushfx-stab"), stV = pop.querySelector(".brushfx-stab-val");
+    st.addEventListener("input", () => {
+      const v = parseInt(st.value, 10);
+      StabilizerEngine.setLevel(v);
+      stV.textContent = v === 0 ? "OFF" : v;
+      this._refreshBrushFxBtn();
+    });
+
+    this._brushFxOutside = (e) => {
+      const p = document.getElementById("brushfx-popover");
+      if (p && !p.contains(e.target) && !btn.contains(e.target)) this._closeBrushFx();
+    };
+    setTimeout(() => document.addEventListener("click", this._brushFxOutside, true), 0);
   },
 }, "TopBar");
 
@@ -16463,10 +16533,13 @@ Modul.extend(TopBar, "topbar-html.js", {
         <button id="topbar-redo" class="topbar-btn" aria-label="Redo" disabled>
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M15 7l5 5-5 5"/><path d="M20 12H9a5 5 0 0 0 0 10h1"/></svg>
           </button>
-          <button id="topbar-history" class="topbar-btn" aria-label="Riwayat">
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="13" r="8"/><path d="M12 9v4l3 2"/><path d="M5 3L3 5"/></svg>
+          <button id="topbar-brushfx" class="topbar-btn" aria-label="Tirus & Stabilisator">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M3 19C9 19 15 11 21 5C17 14 11 20 3 19z"/></svg>
           </button>
          <div class="topbar-collapsible topbar-toggle-group topbar-collapsed" data-ui-hideable>
+            <button id="topbar-history" class="topbar-btn" aria-label="Riwayat">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="13" r="8"/><path d="M12 9v4l3 2"/><path d="M5 3L3 5"/></svg>
+          </button>
             <button id="topbar-onion" class="topbar-btn ${CanvasEngine.onionSkin.enabled ? "topbar-btn-active" : ""}" aria-label="Onion Skin">
               <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><circle cx="12" cy="12" r="9"/><circle cx="12" cy="12" r="5.5"/><circle cx="12" cy="12" r="2"/></svg>
             </button>
@@ -27038,6 +27111,8 @@ Modul.extend(CanvasEngine, "stroke-begin.js", {
     // jalan, gambar lama tetap aman utuh.
     this.taperPreviewCanvas = null;
     this.currentStrokePoints = null;
+    this._taperTextured = false;
+    this._taperScratch = null;
     if (
       this.activeTool === "brush" &&
       typeof BrushLibraryEngine !== "undefined" &&
@@ -27049,6 +27124,15 @@ Modul.extend(CanvasEngine, "stroke-begin.js", {
       this.taperPreviewCanvas.height = offCanvas.height;
     // FIX BUG RULER SYMMETRY (mode Tirus): tiap sisi punya array sendiri.
       this.currentStrokePoints = this.lastPoints.map(p => [p]);
+      // Brush selain Pencil/Marker: tekstur aslinya DIPERTAHANKAN. Goresan digambar
+      // normal ke kanvas sementara (_taperScratch), lalu dipotong bentuk tirus.
+      this._taperTextured = BrushLibraryEngine.activeBrushId !== "pencil" && BrushLibraryEngine.activeBrushId !== "marker";
+      this._taperScratch = null;
+      if (this._taperTextured) {
+        this._taperScratch = document.createElement("canvas");
+        this._taperScratch.width = offCanvas.width;
+        this._taperScratch.height = offCanvas.height;
+      }
     }
 
     // FITUR BARU (Stabilisator mode "Setelah"): siapin "buku catatan"
@@ -27253,18 +27337,113 @@ if (!this._compositeRAFPending) {
   KALAU RUSAK: ujung goresan tidak tirus / preview tirus tidak muncul
 */
 Modul.extend(CanvasEngine, "stroke-taper.js", {
+  // Titik mentah dihaluskan DULU (kurva kuadratik lewat titik-tengah), lalu titik hasilnya
+  // dipakai oleh DUA jalur sekaligus: tekstur (scratch) dan pemotong tirus (mask).
+  // Dulu tekstur pakai titik mentah (garis lurus) tapi mask pakai kurva halus -> pas
+  // digores cepat dua-duanya beda bentuk, tekstur terpotong bengkok/patah.
   strokeTaperMove(points) {
-      // ===== TAPER BRUSH: kalau lagi mode tirus, JANGAN nempel-nempel
-      // segmen ke offCanvas asli. Gambar ULANG seluruh goresan dari titik
-      // pertama sampai sekarang ke kanvas preview yang bersih (di-clear
-      // dulu tiap gerak), supaya tirus di ujung awal & akhir kelihatan
-      // mulus dan warnanya gak dobel numpuk. Kanvas layer asli baru
-      // ditempeli sekali pas jari diangkat -- lihat finishStroke(). =====
-        points.forEach((point, i) => {
-          if (!this.currentStrokePoints[i]) this.currentStrokePoints[i] = [point];
-          else this.currentStrokePoints[i].push(point);
+        if (this._tpFor !== this.currentStrokePoints) {
+          this._tpFor = this.currentStrokePoints;
+          this._tpRaw = this.currentStrokePoints.map(a => [a[0]]);
+          this._tpStart = this.currentStrokePoints.map(a => a[0]);
+        }
+        const outPts = points.map(() => []);
+        points.forEach((pt, i) => {
+          const raw = this._tpRaw[i];
+          if (!raw) return;
+          const prev = raw[raw.length - 1];
+          if (Math.hypot(pt.x - prev.x, pt.y - prev.y) < 0.5) return;
+          raw.push(pt);
+          const a = this._tpStart[i];
+          const b = { x: (prev.x + pt.x) / 2, y: (prev.y + pt.y) / 2 };
+          this._taperCurve(outPts[i], a, prev, b);
+          this._tpStart[i] = b;
         });
+        this._taperEmit(outPts, points);
+  },
+
+  _taperCurve(out, a, c, b) {
+        const len = Math.hypot(c.x - a.x, c.y - a.y) + Math.hypot(b.x - c.x, b.y - c.y);
+        const n = Math.max(1, Math.ceil(len / 3));
+        for (let k = 1; k <= n; k++) {
+          const t = k / n, u = 1 - t;
+          out.push({ x: u * u * a.x + 2 * u * t * c.x + t * t * b.x, y: u * u * a.y + 2 * u * t * c.y + t * t * b.y });
+        }
+  },
+
+  // Sambung sisa ekor (titik tengah terakhir -> titik jari terakhir). Dipanggil saat jari diangkat.
+  _taperFlushTail() {
+        if (!this._tpRaw || this._tpFor !== this.currentStrokePoints) return;
+        const outPts = this._tpRaw.map((raw, i) => {
+          const o = [];
+          const a = this._tpStart[i], e = raw[raw.length - 1];
+          if (a && e && Math.hypot(e.x - a.x, e.y - a.y) > 0.01) this._taperCurve(o, a, { x: (a.x + e.x) / 2, y: (a.y + e.y) / 2 }, e);
+          this._tpStart[i] = e;
+          return o;
+        });
+        this._taperEmit(outPts, this.lastPoints);
+  },
+
+  _taperEmit(outPts, fallback) {
+        const maxN = Math.max(0, ...outPts.map(a => a.length));
+        const textured = this._taperTextured && this._taperScratch;
+        let sctx = null, size0 = 0;
+        if (textured) {
+          sctx = this._taperScratch.getContext("2d");
+          sctx.globalCompositeOperation = "source-over";
+          sctx.lineCap = "round";
+          sctx.lineJoin = "round";
+          size0 = this.brushSize * this.layerSizeK();
+          sctx.lineWidth = size0;
+        }
+        for (let j = 0; j < maxN; j++) {
+          const step = outPts.map((arr, i) => arr.length ? arr[Math.min(j, arr.length - 1)] : this.currentStrokePoints[i][this.currentStrokePoints[i].length - 1]);
+          step.forEach((p, i) => { if (j < outPts[i].length) this.currentStrokePoints[i].push(p); });
+          if (textured) {
+            this.lastPoints = this.currentStrokePoints.map((a, i) => a.length > 1 && j < outPts[i].length ? a[a.length - 2] : step[i]);
+            this.strokeBrushMove(sctx, step, this._taperScratch, size0);
+          }
+          this._taperLastPoint = step[step.length - 1];
+        }
+        if (maxN) this.lastPoints = this.currentStrokePoints.map(a => a[a.length - 1]);
+        else if (fallback) this.lastPoints = fallback;
+        this._taperDirty = true;
+        if (!this._taperRAF) {
+          this._taperRAF = requestAnimationFrame(() => {
+            this._taperRAF = 0;
+            if (this._taperDirty) this._taperRenderNow();
+            this.strokeRenderSoon();
+          });
+        }
+  },
+
+  // Gambar ulang preview tirus (dipanggil max 1x per frame, dan sekali lagi saat jari diangkat).
+  _taperRenderNow() {
+        this._taperDirty = false;
+        if (!this.taperPreviewCanvas || !this.currentStrokePoints) return;
+        const points = this._taperLastPoint ? [this._taperLastPoint] : this.lastPoints;
         const previewCtx = this.taperPreviewCanvas.getContext("2d");
+        if (this._taperTextured && this._taperScratch) {
+          // Mode tekstur: gambar segmen baru dgn brush aslinya ke kanvas sementara,
+          // lalu preview = kanvas itu dipotong bentuk tirus (awal/akhir).
+          const size = this.brushSize * this.layerSizeK();
+          previewCtx.globalCompositeOperation = "source-over";
+          previewCtx.clearRect(0, 0, this.taperPreviewCanvas.width, this.taperPreviewCanvas.height);
+          previewCtx.drawImage(this._taperScratch, 0, 0);
+          // Bentuk pemotong digambar dulu di kanvas terpisah (semua sisi simetri sekaligus).
+          if (!this._taperMask || this._taperMask.width !== this.taperPreviewCanvas.width || this._taperMask.height !== this.taperPreviewCanvas.height) {
+            this._taperMask = document.createElement("canvas");
+            this._taperMask.width = this.taperPreviewCanvas.width;
+            this._taperMask.height = this.taperPreviewCanvas.height;
+          }
+          const mctx = this._taperMask.getContext("2d");
+          mctx.clearRect(0, 0, this._taperMask.width, this._taperMask.height);
+          this.currentStrokePoints.forEach(sp => BrushLibraryEngine.renderTaperedStroke(mctx, sp, size, "#000", { mask: true }));
+          previewCtx.globalCompositeOperation = "destination-in";
+          previewCtx.drawImage(this._taperMask, 0, 0);
+          previewCtx.globalCompositeOperation = "source-over";
+          return;
+        }
         previewCtx.clearRect(0, 0, this.taperPreviewCanvas.width, this.taperPreviewCanvas.height);
         const taperColor = (typeof PatternEngine !== "undefined" && PatternEngine.active)
           ? PatternEngine.getCanvasPattern(previewCtx)
@@ -27274,7 +27453,6 @@ Modul.extend(CanvasEngine, "stroke-taper.js", {
         this.currentStrokePoints.forEach(sidePoints => {
          BrushLibraryEngine.renderTaperedStroke(previewCtx, sidePoints, this.brushSize * this.layerSizeK(), taperColor);
         });
-        this.lastPoints = points;
   },
 }, "CanvasEngine");
 
@@ -27707,6 +27885,9 @@ Modul.extend(CanvasEngine, "stroke-finish.js", {
     // aktif -- kalau enggak, goresan di Layer Cel gak pernah kesimpen.
     const offCanvas = this.ensureLayerCanvas(layer);
     if (!offCanvas) return;
+    // FIX lemot/patah: render tirus ditunda ke rAF, pastikan frame terakhir sudah tergambar sebelum ditempel
+    if (this.taperPreviewCanvas && typeof this._taperFlushTail === "function") this._taperFlushTail();
+    if (this.taperPreviewCanvas && this._taperDirty && typeof this._taperRenderNow === "function") this._taperRenderNow();
     this.strokeFinishDraw(offCanvas);
     this._lastLiveSegment = null;
   this._lineStrokeScratch = null;
@@ -27721,6 +27902,8 @@ Modul.extend(CanvasEngine, "stroke-finish.js", {
       offCanvas.getContext("2d").drawImage(this.taperPreviewCanvas, 0, 0);
       this.taperPreviewCanvas = null;
       this.currentStrokePoints = null;
+      this._taperScratch = null;
+      this._taperTextured = false;
     }
    this._alphaLockEnd(true);
    // FITUR BARU (Kunci Gambar / PaintLockEngine): offCanvas di titik INI
@@ -27825,6 +28008,7 @@ Modul.extend(CanvasEngine, "stroke-finish.js", {
       this.compositeAll();
     } else if (
       this.activeTool === "brush" &&
+      !this.taperPreviewCanvas && // FIX buletan di ujung tirus: mode tirus punya preview sendiri
       typeof BrushLibraryEngine !== "undefined" &&
       this._lastLiveSegment
     ) {
@@ -28270,13 +28454,12 @@ Modul.extend(BrushSizeEngine, "brushsize-popover.js", {
     // Toggle "Tirus" cuma relevan buat tool Brush (bukan Eraser) --
     // ini kontrol utk fitur Taper di brushlibrary (ujung goresan
     // dibikin lancip/tipis, kayak fitur di ibisPaint X).
-    const showTaper = CanvasEngine.activeTool === "brush" && typeof BrushLibraryEngine !== "undefined";
+    const showTaper = false; // pindah ke tombol Tirus & Stabilisator di Top Bar
 
     // Stabilisator -- cuma relevan buat Brush & Eraser (bukan Smudge).
     // Bukanya lewat popover kecil sendiri (openStabilizerPopover),
     // dianchor ke tombol "Stabil" DI DALAM popover ukuran ini.
-    const showStabilizer = (CanvasEngine.activeTool === "brush" || CanvasEngine.activeTool === "eraser")
-      && typeof StabilizerEngine !== "undefined";
+    const showStabilizer = false; // pindah ke tombol Tirus & Stabilisator di Top Bar
 
     const pop = document.createElement("div");
     pop.id = "brushsize-popover";
@@ -28294,7 +28477,9 @@ Modul.extend(BrushSizeEngine, "brushsize-popover.js", {
   },
 
   _popoverHtml(current, showTaper, showStabilizer) {
-    const taperChecked = showTaper && BrushLibraryEngine.taperEnabled ? "checked" : "";
+    const tS = showTaper && BrushLibraryEngine.taperStart;
+    const tE = showTaper && BrushLibraryEngine.taperEnd;
+    const tA = showTaper ? BrushLibraryEngine.taperAmount : 5;
     const stabilizerActive = showStabilizer && StabilizerEngine.level > 0;
     return `
       <div class="brushsize-popover-row">
@@ -28303,13 +28488,18 @@ Modul.extend(BrushSizeEngine, "brushsize-popover.js", {
         <span class="brushsize-value">${current}px</span>
         <button class="brushsize-btn" data-action="inc">+</button>
       </div>
+      ${showTaper ? `
+        <div class="brushsize-popover-row brushsize-taper-amount-row">
+          <span class="brushsize-taper">Tirus</span>
+          <input type="range" class="brushsize-slider brushsize-taper-amount" min="1" max="10" step="1" value="${tA}">
+          <span class="brushsize-value brushsize-taper-val">${tA}</span>
+        </div>
+      ` : ""}
       ${(showTaper || showStabilizer) ? `
         <div class="brushsize-popover-row brushsize-popover-row-secondary">
           ${showTaper ? `
-            <label class="brushsize-taper">
-              <input type="checkbox" class="brushsize-taper-checkbox" ${taperChecked}>
-              Tirus
-            </label>
+            <button class="brushsize-stabilizer-btn brushsize-taper-btn${tS ? " is-active" : ""}" data-taper="start">Awal</button>
+            <button class="brushsize-stabilizer-btn brushsize-taper-btn${tE ? " is-active" : ""}" data-taper="end">Akhir</button>
           ` : ""}
           ${showStabilizer ? `
             <button class="brushsize-stabilizer-btn${stabilizerActive ? " is-active" : ""}" data-action="stabilizer">
@@ -28337,10 +28527,19 @@ Modul.extend(BrushSizeEngine, "brushsize-popover.js", {
 
   _bindOptionControls(pop, showTaper, showStabilizer) {
     if (showTaper) {
-      const taperCheckbox = pop.querySelector(".brushsize-taper-checkbox");
-      if (taperCheckbox) {
-        taperCheckbox.addEventListener("change", () => {
-          BrushLibraryEngine.setTaper(taperCheckbox.checked);
+      pop.querySelectorAll(".brushsize-taper-btn").forEach(btn => {
+        btn.addEventListener("click", () => {
+          const k = btn.dataset.taper;
+          BrushLibraryEngine.setTaperOptions({ [k]: !(k === "start" ? BrushLibraryEngine.taperStart : BrushLibraryEngine.taperEnd) });
+          btn.classList.toggle("is-active", k === "start" ? BrushLibraryEngine.taperStart : BrushLibraryEngine.taperEnd);
+        });
+      });
+      const amt = pop.querySelector(".brushsize-taper-amount");
+      const amtVal = pop.querySelector(".brushsize-taper-val");
+      if (amt) {
+        amt.addEventListener("input", () => {
+          BrushLibraryEngine.setTaperOptions({ amount: +amt.value });
+          if (amtVal) amtVal.textContent = amt.value;
         });
       }
     }
@@ -31298,29 +31497,50 @@ Modul.extend(BrushLibraryEngine, "brushlibrary-airbrush.js", {
   KALAU RUSAK: Mode Tirus tidak meruncing / goresan gerigi
 */
 Modul.extend(BrushLibraryEngine, "brushlibrary-taper.js", {
+  // Pengaturan tirus ala ibisPaint X: tirus di AWAL goresan, di AKHIR goresan,
+  // atau dua-duanya, plus seberapa panjang tirusnya (taperAmount 1-10).
+  taperStart: false,
+  taperEnd: false,
+  taperAmount: 5,
+
+  loadTaper() {
+    try {
+      const j = JSON.parse(localStorage.getItem("taperSettings") || "null");
+      if (j) {
+        this.taperStart = !!j.start;
+        this.taperEnd = !!j.end;
+        this.taperAmount = Math.min(10, Math.max(1, Math.round(j.amount) || 5));
+      }
+    } catch (e) {}
+    this.taperEnabled = this.taperStart || this.taperEnd;
+  },
+
+  setTaperOptions(o) {
+    if (o.start !== undefined) this.taperStart = !!o.start;
+    if (o.end !== undefined) this.taperEnd = !!o.end;
+    if (o.amount !== undefined) this.taperAmount = Math.min(10, Math.max(1, Math.round(o.amount) || 5));
+    this.taperEnabled = this.taperStart || this.taperEnd;
+    try {
+      localStorage.setItem("taperSettings", JSON.stringify({ start: this.taperStart, end: this.taperEnd, amount: this.taperAmount }));
+    } catch (e) {}
+  },
+
+  // Kompatibel dengan pemanggil lama: nyalain/matiin dua-duanya.
   setTaper(enabled) {
-    this.taperEnabled = !!enabled;
+    this.setTaperOptions({ start: !!enabled, end: !!enabled });
   },
 
+  // Semua brush bisa ditirus (dulu cuma Pencil & Marker, makanya "gak berfungsi"
+  // di brush lain).
   isTaperCapable() {
-    return this.activeBrushId === "pencil" || this.activeBrushId === "marker";
+    return true;
   },
 
-  // Konfigurasi ketebalan & transparansi tetap ngikutin karakter brush
-  // aslinya (Pencil tipis+padat, Marker tebal+transparan) -- taper cuma
-  // nambah efek tirus di ujung, gak ganti karakter dasar brush-nya.
+  // Pencil & Marker tetap pakai karakter khasnya; brush lain ukuran & alpha apa adanya.
   getTaperConfig() {
     if (this.activeBrushId === "marker") return { sizeMultiplier: 1.6, alpha: 0.45 };
-    return { sizeMultiplier: 0.52, alpha: 0.68 };
-  },
-
-  // Seberapa "tirus" titik ke-`index` dari total `total` titik goresan.
-  // 18% titik pertama & 18% titik terakhir diramp dari tipis ke normal
-  // (dan sebaliknya), sisanya di tengah full ukuran normal.
-  taperFactor(index, total, taperCount) {
-    if (index < taperCount) return (index + 1) / (taperCount + 1);
-    if (index > total - 1 - taperCount) return (total - index) / (taperCount + 1);
-    return 1;
+    if (this.activeBrushId === "pencil") return { sizeMultiplier: 0.52, alpha: 0.68 };
+    return { sizeMultiplier: 1, alpha: 1 };
   },
 
   // Gambar ULANG seluruh goresan (array titik lokal layer) sebagai satu
@@ -31344,21 +31564,45 @@ Modul.extend(BrushLibraryEngine, "brushlibrary-taper.js", {
     return out;
   },
 
-  renderTaperedStroke(ctx, points, size, color) {
+  renderTaperedStroke(ctx, points, size, color, opts) {
+    const asMask = !!(opts && opts.mask); // mode tekstur: bentuk tirus dipakai sbg pemotong, ukuran & alpha penuh
     if (!points || points.length < 2) return;
-    points = this.smoothPoints(points);
+    // buang titik yang terlalu rapat (<1.5px) -> jauh lebih sedikit lingkaran & lebih ringan
+    const thin = [points[0]];
+    for (let k = 1; k < points.length - 1; k++) {
+      const q = thin[thin.length - 1];
+      if (Math.hypot(points[k].x - q.x, points[k].y - q.y) >= 1.5) thin.push(points[k]);
+    }
+    thin.push(points[points.length - 1]);
+    points = asMask ? thin : this.smoothPoints(thin); // mask harus persis sama dgn jalur tekstur
+    if (points.length < 2) return;
 
-    const cfg = this.getTaperConfig();
+    const cfg = asMask ? { sizeMultiplier: 1.15, alpha: 1 } : this.getTaperConfig();
     const baseSize = size * cfg.sizeMultiplier;
     const total = points.length;
-    const taperCount = Math.max(1, Math.round(total * 0.18));
+
+    // Jarak kumulatif sepanjang goresan; panjang tirus = amount(1-10) x ukuran brush x 2,
+    // dibatasi supaya awal & akhir gak saling tabrak di goresan pendek.
+    const cum = [0];
+    for (let i = 1; i < total; i++) {
+      cum.push(cum[i - 1] + Math.hypot(points[i].x - points[i - 1].x, points[i].y - points[i - 1].y));
+    }
+    const totalLen = cum[total - 1] || 1;
+    let rampLen = Math.max(4, this.taperAmount * Math.max(baseSize, 4) * 2);
+    rampLen = Math.min(rampLen, this.taperStart && this.taperEnd ? totalLen / 2 : totalLen * 0.95);
+    const factorAt = (i) => {
+      let f = 1;
+      if (this.taperStart) f = Math.min(f, cum[i] / rampLen);
+      if (this.taperEnd) f = Math.min(f, (totalLen - cum[i]) / rampLen);
+      return Math.max(0.04, Math.min(1, f));
+    };
 
     const path = new Path2D();
     for (let i = 0; i < total - 1; i++) {
       const p0 = points[i];
       const p1 = points[i + 1];
-      const t0 = this.taperFactor(i, total, taperCount);
-      const t1 = this.taperFactor(i + 1, total, taperCount);
+      const t0 = factorAt(i);
+      const t1 = factorAt(i + 1);
       const dist = Math.max(0.001, Math.hypot(p1.x - p0.x, p1.y - p0.y));
       // Spacing ngikut ukuran AKTUAL segmen ini (rata-rata t0/t1), bukan
       // ukuran penuh brush -- supaya di bagian yg ditirus (radius kecil)
@@ -31370,8 +31614,12 @@ Modul.extend(BrushLibraryEngine, "brushlibrary-taper.js", {
 
       for (let s = 0; s <= steps; s++) {
         const tt = s / steps;
-        const x = p0.x + (p1.x - p0.x) * tt;
-        const y = p0.y + (p1.y - p0.y) * tt;
+        // FIX patah-patah: kurva Catmull-Rom lewat titik-titik, bukan garis lurus
+        // (goresan cepat = titik jarang = dulu jadi segi-banyak bergerigi)
+        const pm = points[i - 1] || p0, pn = points[i + 2] || p1;
+        const t2 = tt * tt, t3 = t2 * tt;
+        const x = 0.5 * ((2 * p0.x) + (-pm.x + p1.x) * tt + (2 * pm.x - 5 * p0.x + 4 * p1.x - pn.x) * t2 + (-pm.x + 3 * p0.x - 3 * p1.x + pn.x) * t3);
+        const y = 0.5 * ((2 * p0.y) + (-pm.y + p1.y) * tt + (2 * pm.y - 5 * p0.y + 4 * p1.y - pn.y) * t2 + (-pm.y + 3 * p0.y - 3 * p1.y + pn.y) * t3);
         const widthFactor = t0 + (t1 - t0) * tt;
         const r = Math.max(0.4, (baseSize * widthFactor) / 2);
         path.moveTo(x + r, y);
@@ -31386,6 +31634,8 @@ Modul.extend(BrushLibraryEngine, "brushlibrary-taper.js", {
     ctx.restore();
   }
 }, "BrushLibraryEngine");
+
+BrushLibraryEngine.loadTaper();
 
 /*
   colorpanel.js
