@@ -2838,6 +2838,62 @@ html[data-paper="watercolor"] .editor-canvas-wrapper::after {
   white-space: nowrap;
 }
 /*
+  MESHPART.CSS
+  ------------
+  Tampilan bar tool Mesh- (meshpart-bar.js). Tombol memakai kelas .mesh-mode-btn dari mesh.css.
+  Garis neon & garis pembatas digambar langsung di canvas (bukan HTML).
+*/
+
+.meshpart-bar {
+  flex-direction: column;
+  align-items: stretch;
+  gap: 2px;
+  padding: 4px 10px;
+  border-radius: 18px;
+  max-width: calc(100% - 24px);
+  width: max-content;
+  min-width: 220px;
+}
+
+.meshpart-row {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+}
+
+.meshpart-hint {
+  flex: 1;
+  min-width: 0;
+  font-size: 11px;
+  line-height: 1.2;
+  color: var(--text-secondary, inherit);
+  text-align: center;
+  padding: 0 4px;
+}
+
+.meshpart-sliders {
+  gap: 10px;
+  padding-bottom: 2px;
+}
+
+.meshpart-slider {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  font-size: 10px;
+  line-height: 1.1;
+  color: var(--text-secondary, inherit);
+}
+
+.meshpart-slider input[type="range"] {
+  width: 100%;
+  margin: 2px 0 0;
+  accent-color: var(--accent);
+  touch-action: manipulation;
+}
+
+/*
   TIMELINE.CSS
   ------------
   Hanya untuk tampilan bar Timeline (timeline.js). Timeline tetap

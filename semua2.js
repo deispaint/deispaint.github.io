@@ -8279,6 +8279,17 @@ Modul.extend(SceneRec, "scenerec-hold.js", {
     try { localStorage.setItem("a2d-rec-hold", this._hold ? "1" : "0"); } catch (err) {}
     this._render();
   },
+  // Sentuhan "persiapan": bikin seleksi, menaruh/menghapus titik Mesh, menggambar lasso.
+  // Ini BUKAN gerakan yang mau direkam, jadi jam rekam tidak boleh ikut jalan.
+  _isSetupTouch() {
+    try {
+      const tool = typeof CanvasEngine !== "undefined" ? CanvasEngine.activeTool : null;
+      if (tool === "selection" || tool === "magic-wand") return true;
+      if (tool === "mesh" && typeof MeshEngine !== "undefined" && (MeshEngine.mode === "add" || MeshEngine.mode === "delete")) return true;
+      if (tool === "lasso" && typeof LassoEngine !== "undefined" && (LassoEngine.phase === "idle" || LassoEngine.phase === "drawing")) return true;
+    } catch (err) { /* anggap bukan persiapan */ }
+    return false;
+  },
   _bindHold() {
     if (this._holdBound) return;
     this._holdBound = true;
@@ -8292,7 +8303,7 @@ Modul.extend(SceneRec, "scenerec-hold.js", {
       if (!onCanvas(e)) return;
       this._ptrs.add(e.pointerId);
       const rec = this._rec;
-      if (rec && rec.hold && !rec.cd && rec.paused) this._resume();
+      if (rec && rec.hold && !rec.cd && rec.paused && !this._isSetupTouch()) this._resume();
     }, true);
     const up = (e) => {
       if (!this._ptrs.delete(e.pointerId)) return;
@@ -13960,7 +13971,10 @@ Modul.extend(LassoEngine, "lasso-commit.js", {
     }
 
     const offCanvas = CanvasEngine.ensureLayerCanvas(layer);
-    const ctx = offCanvas.getContext("2d");
+       const ctx = offCanvas.getContext("2d");
+    // Mesh-: simpanan gambar tersembunyi (di bawah rambut) ikut diubah bersama layer
+    let follow = null;
+    try { if (typeof MeshPartEngine !== "undefined" && MeshPartEngine._followBegin) follow = MeshPartEngine._followBegin(layer, offCanvas, this); } catch (err) { console.error("Mesh- follow gagal:", err); }
 
     // Kalau belum pernah tap "Salin" -- baru DI SINI area asalnya
     // beneran dibolongin (bukan pas nutup lasso).
@@ -13974,8 +13988,9 @@ Modul.extend(LassoEngine, "lasso-commit.js", {
     ctx.rotate(this.angle);
     ctx.scale(this.scaleX, this.scaleY);
     ctx.translate(-this.center.x, -this.center.y);
-    ctx.drawImage(this.pieceCanvas, 0, 0);
+        ctx.drawImage(this.pieceCanvas, 0, 0);
     ctx.restore();
+    try { if (follow) MeshPartEngine._followEnd(follow, this, offCanvas); } catch (err) { console.error("Mesh- follow gagal:", err); }
 
     const imageData = await CanvasEngine.encodeLayerCanvas(offCanvas);
     ProjectStore.updateLayer(layer.id, { imageData });
@@ -14695,8 +14710,12 @@ Modul.extend(MeshTransformEngine, "mt-bake.js", {
 
     const offCanvas = CanvasEngine.ensureLayerCanvas(layer);
     const ctx = offCanvas.getContext("2d");
+    // Mesh-: simpanan gambar tersembunyi (di bawah rambut) ikut dicetak dengan warp yang sama
+    let follow = null;
+    try { if (typeof MeshPartEngine !== "undefined" && MeshPartEngine._followBakeBegin) follow = MeshPartEngine._followBakeBegin(layer, offCanvas); } catch (err) { console.error("Mesh- follow gagal:", err); }
     ctx.clearRect(0, 0, offCanvas.width, offCanvas.height);
     ctx.drawImage(bakedCanvas, 0, 0);
+    try { if (follow) MeshPartEngine._followBakeEnd(follow, layer, meshTransform, offCanvas); } catch (err) { console.error("Mesh- follow gagal:", err); }
 
     const imageData = await CanvasEngine.encodeLayerCanvas(offCanvas);
     ProjectStore.updateLayer(layer.id, { imageData, transform: { x: 0, y: 0 } });
@@ -15033,10 +15052,10 @@ Modul.extend(MeshTransformEngine, "mt-modebuttons.js", {
     bar.id = "meshtransform-mode-bar";
     bar.className = "mesh-mode-bar"; // pinjam style dari mesh.css, generik
     bar.innerHTML = `
-      <button class="mesh-mode-btn" data-mode="move">Geser</button>
-      <button class="mesh-mode-btn" data-mode="add">+ Titik</button>
-      <button class="mesh-mode-btn" data-mode="delete">- Titik</button>
-      <button class="mesh-mode-btn" data-action="release">Lepas Layer</button>
+      <button class="mesh-mode-btn" data-mode="move" title="Geser titik" aria-label="Geser titik">${LassoEngine._ic("move")}</button>
+      <button class="mesh-mode-btn" data-mode="add" title="Tambah titik" aria-label="Tambah titik">${LassoEngine._ic("addpoint")}</button>
+      <button class="mesh-mode-btn" data-mode="delete" title="Hapus titik" aria-label="Hapus titik">${LassoEngine._ic("delpoint")}</button>
+      <button class="mesh-mode-btn" data-action="release" title="Lepas Layer" aria-label="Lepas Layer">${LassoEngine._ic("unlock")}</button>
     `;
     container.appendChild(bar);
     this.renderModeButtons();
@@ -15355,6 +15374,3221 @@ Modul.extend(MeshTransformEngine, "mt-warp.js", {
     }
   }
 }, "MeshTransformEngine");
+
+/*
+  meshpart.js
+  TUGAS     : cangkang Mesh- (Mesh Bagian): data awal saja. Tugas menempel di meshpart-*.js
+  BAGIAN DARI: MeshPartEngine
+  DIPANGGIL OLEH: canvas-events (ganti tool), canvas-input-route (sentuhan), canvas-compose (overlay), toolbar (tombol tool)
+  MEMANGGIL : tidak ada
+  EVENT     : tidak ada
+  KALAU RUSAK: meshpart-space, meshpart-detect, meshpart-fill, meshpart-pointer, meshpart-warp, meshpart-overlay, meshpart-bar
+*/
+/*
+  MESHPART.JS
+  -----------
+  RUMAH buat tool "Mesh-" (Mesh Bagian).
+
+  Beda sama Mesh dan Mesh+:
+  - Mesh & Mesh+ -> 1 grid IDW untuk SEMUA yang diseleksi, jadi narik badan
+    ikut narik wajah (rumus IDW tidak kenal "bagian").
+  - Mesh-        -> gambar di 1 layer (atau beberapa layer) otomatis dipecah
+    jadi BAGIAN (bentuk yang saling nyambung). Tiap bagian dikasih garis neon.
+    Tap 1 bagian -> neon bagian itu nyala, bagian lain padam. Pegang garis
+    neon di mana saja lalu tarik -> HANYA bagian itu yang berubah bentuk.
+    Bagian lain tidak disentuh sama sekali.
+
+  Cara kerja singkat:
+  1. meshpart-detect.js : cari bagian (connected component) + bikin garis neon
+  2. meshpart-pointer.js: tap = pilih bagian, tarik garis = tarik bagian
+  3. meshpart-warp.js   : warp lokal (hanya dalam bagian) + hasil ditempel ke layer
+  4. meshpart-fill.js   : area yang ditinggalkan bagian diisi warna terdekat
+  5. meshpart-overlay.js: gambar neon & garis pembatas di atas kanvas
+
+  Rumus segitiga warp dipakai ulang dari MeshEngine.drawWarpedTriangle
+  (tidak ditulis ulang). Mesh dan Mesh+ TIDAK diubah sama sekali.
+
+  CATATAN: layer yang jadi anggota Mesh+ dilewati (bake dulu lewat "Lepas Layer").
+  Kamera Scene tidak ikut dihitung di pemetaan sentuhan.
+*/
+
+const MeshPartEngine = {
+  active: false,
+  mode: "pull",        // "pull" (pilih & tarik) | "divide" (gambar garis pembatas)
+
+  spread: 0.4,         // jangkauan tarikan (x sisi terpanjang bagian); di luar ini bagian TIDAK bergerak
+  colorTol: 40,        // toleransi warna (0 = mati): beda warna lebih dari ini dipisah jadi bagian lain (rambut / wajah)
+  gap: 2,              // jarak gabung (px kanvas): celah sekecil ini dianggap satu bagian
+
+  DETECT_MAX: 640,     // sisi terpanjang peta deteksi (kecil = cepat)
+  MAX_PARTS: 40,       // bagian terbesar yang dipakai per layer
+  MIN_CELLS: 6,        // bentuk lebih kecil dari ini diabaikan
+  ALPHA_MIN: 16,       // alpha minimal agar pixel dianggap "ada gambar"
+  DIVIDER_WIDTH: 8,    // tebal garis pembatas (px kanvas)
+
+  recs: {},            // layerId -> hasil analisis layer
+  order: [],           // layerId bawah -> atas
+  skipped: 0,          // jumlah layer yang dilewati (Mesh+ / terkunci / tersembunyi)
+  dividers: [],        // garis pembatas manual (koordinat kanvas)
+  liveDivider: null,   // garis pembatas yang sedang digambar
+  selected: null,      // { layerId, id } = entri pertama selAll (bagian utama)
+  selAll: [],          // [{ layerId, id }] satu per layer yang punya bagian terpilih (id = bagian biasa, atau nomor bagian gabungan)
+  selPts: [],          // [{ layerId, id, x, y }] semua bagian terpilih (1 = biasa, 2+ = gabungan yang ditarik barengan)
+  selPoint: null,      // { layerId, x, y } titik lokal di dalam bagian terpilih (supaya pilihan bertahan)
+  down: null,          // sentuhan yang sedang berjalan
+  pull: null,          // tarikan yang sedang berjalan (sembunyikan neon)
+  dirty: true,
+  _sig: "",
+  _poll: null,
+  _bound: false,
+  _rafPending: false,
+  _ignoreUntil: 0,
+  _color: "",
+  _colorAt: 0,
+  _pendingAnalyze: null, // layerId yang baru ditarik: analisis ulang ditunda 1 frame supaya hasil tarikan tampil dulu
+  _analyzing: false,     // true = neon disembunyikan sebentar (menunggu analisis ulang)
+  _selfSave: null,       // simpan gambar hasil tarikan sendiri (bukan perubahan gambar baru)
+  _saveTok: 0,
+  _refineTimer: null,
+  under: {},             // pixel bagian LAIN yang tertutup bagian yang ditarik: {layerId: {canvas, frame, hash}}
+  pullNeons: {},         // neon hidup selama menarik, satu per layer yang ikut ditarik: {idLayer: {layerId, canvas, x, y, w, h}}; bentuknya ikut jari, tidak pernah padam
+  _prewarmTimer: null,
+  _initPending: false,   // analisis awal ditunda 1 frame supaya bar dan tombol tool tampil dulu (tidak macet saat tap ikon)
+  _initTimer: null,
+  _neonTimer: null,      // neon kasar bagian-bagian dibuat bergiliran, bukan sekaligus
+  _frameBudget: 60000    // jumlah sel hitung per frame saat menarik (menyesuaikan kecepatan HP sendiri)
+};
+
+/*
+  meshpart-space.js
+  TUGAS     : daftar layer yang dipakai Mesh-, dan pemetaan koordinat kanvas <-> koordinat lokal layer
+  BAGIAN DARI: MeshPartEngine
+  DIPANGGIL OLEH: meshpart-detect.js, meshpart-pointer.js, meshpart-warp.js, meshpart-overlay.js
+  MEMANGGIL : ProjectStore, LayerPanel.selectedLayerIds, CanvasEngine.getAnimatedState
+  EVENT     : tidak ada
+  KALAU RUSAK: sentuhan meleset dari neon / layer yang dicentang tidak terbaca
+*/
+Modul.extend(MeshPartEngine, "meshpart-space.js", {
+  // Layer yang dicentang di panel Layer; kalau tidak ada yang dicentang, layer aktif. Urutan bawah -> atas.
+  targetLayers() {
+    const project = ProjectStore.getProject();
+    if (!project) return [];
+    let ids = [];
+    if (typeof LayerPanel !== "undefined" && Array.isArray(LayerPanel.selectedLayerIds) && LayerPanel.selectedLayerIds.length) {
+      ids = LayerPanel.selectedLayerIds.slice();
+    } else if (project.activeLayerId) {
+      ids = [project.activeLayerId];
+    }
+    return project.layers.filter(l => ids.includes(l.id));
+  },
+
+  _layerState(layer) {
+    const project = ProjectStore.getProject();
+    const st = CanvasEngine.getAnimatedState(layer, project.currentFrame) || {};
+    return { x: Number(st.x) || 0, y: Number(st.y) || 0 };
+  },
+
+  _layerTf(layer) {
+    const tf = layer.transform || {};
+    return {
+      sx: (typeof tf.scaleX === "number" && tf.scaleX !== 0) ? tf.scaleX : 1,
+      sy: (typeof tf.scaleY === "number" && tf.scaleY !== 0) ? tf.scaleY : 1,
+      rot: typeof tf.rotation === "number" ? tf.rotation : 0
+    };
+  },
+
+  // Titik kanvas -> titik lokal layer (kebalikan persis urutan di drawLayerNormal).
+  toLocal(layer, p, cw, ch) {
+    const st = this._layerState(layer);
+    const t = this._layerTf(layer);
+    if (t.sx === 1 && t.sy === 1 && !t.rot) return { x: p.x - st.x, y: p.y - st.y };
+    const cx = cw / 2, cy = ch / 2;
+    const dx = p.x - st.x - cx, dy = p.y - st.y - cy;
+    const co = Math.cos(-t.rot), sn = Math.sin(-t.rot);
+    return { x: cx + (co * dx - sn * dy) / t.sx, y: cy + (sn * dx + co * dy) / t.sy };
+  },
+
+  // Pasang transform layer ke ctx (sama seperti drawLayerNormal) supaya gambar lokal jatuh di tempat yang benar.
+  applyLayerTransform(ctx, layer, cw, ch) {
+    const st = this._layerState(layer);
+    const t = this._layerTf(layer);
+    const cx = cw / 2, cy = ch / 2;
+    ctx.translate(st.x + cx, st.y + cy);
+    if (t.rot) ctx.rotate(t.rot);
+    if (t.sx !== 1 || t.sy !== 1) ctx.scale(t.sx, t.sy);
+    ctx.translate(-cx, -cy);
+  }
+}, "MeshPartEngine");
+
+/*
+  meshpart-detect.js
+  TUGAS     : mengatur deteksi bagian: kapan menganalisis, pilihan bagian terpilih, neon halus untuk yang dipilih
+  BAGIAN DARI: MeshPartEngine
+  DIPANGGIL OLEH: meshpart-bar.js (aktif), meshpart-pointer.js, meshpart-commit.js (setelah tarikan), meshpart-overlay.js
+  MEMANGGIL : meshpart-analyze.js (_analyzeLayer), meshpart-neon.js, CanvasEngine.ensureLayerCanvas, MeshTransformEngine.findTransformForLayer
+  EVENT     : tidak ada
+  KALAU RUSAK: neon tidak muncul / pilihan hilang setelah menarik / lemot setelah menarik
+*/
+Modul.extend(MeshPartEngine, "meshpart-detect.js", {
+  // Bebaskan memori kanvas neon lama (kanvas yang tidak dipakai lagi tidak langsung dibuang browser, HP jadi berat).
+  _freeCanvas(c) {
+    if (!c) return;
+    try { c.width = 0; c.height = 0; } catch (e) { /* abaikan */ }
+  },
+
+  _releaseRecs() {
+    Object.keys(this.recs || {}).forEach(lid => this._freeRec(this.recs[lid]));
+  },
+
+  // only (opsional) = id layer yang baru berubah (habis ditarik). Layer lain TIDAK dianalisis ulang,
+  // hasil analisis lamanya dipakai lagi (jauh lebih cepat kalau yang dicentang lebih dari 1 layer).
+  analyzeAll(only) {
+    const project = ProjectStore.getProject();
+    const old = this.recs || {};
+    const reuse = !!only;
+    if (reuse) this._freeRec(old[only]); else this._releaseRecs();
+    this.recs = {};
+    this.order = [];
+    this.skipped = 0;
+    if (project) {
+      this.targetLayers().forEach(layer => {
+        if (!this._usable(layer, project)) { this.skipped++; return; }
+        let rec = null;
+        if (reuse && layer.id !== only && old[layer.id]) rec = old[layer.id];
+        else {
+          try { rec = this._analyzeLayer(layer); } catch (err) { console.error("Mesh- analisis gagal:", err); }
+        }
+        if (rec) {
+          if (!rec.hash) rec.hash = this._layerHash(layer);   // sidik gambar saat dianalisis: kalau berubah (Undo dsb) analisis dianggap basi
+          this.recs[layer.id] = rec; this.order.push(layer.id);
+        }
+      });
+      // layer lama yang sudah tidak dipakai lagi: bebaskan memorinya
+      if (reuse) Object.keys(old).forEach(lid => { if (lid !== only && this.recs[lid] !== old[lid]) this._freeRec(old[lid]); });
+    }
+    this.dirty = false;
+    this._pendingAnalyze = null;
+    this._analyzing = false;
+    this._dirtyLayers = null;
+    this._sig = this._signature();
+    this._reselect();
+    this._neonSelectedNow();   // bagian terpilih (semua layer) langsung punya neon, tidak antre giliran
+    if (!this.selected) this._dropPullNeon();
+    this._pullKeepSelection = null;
+    this._pullKeepAll = null;
+    this._pendingMulti = false;
+    this._updateHint();
+    this._scheduleNeons();
+  },
+
+  // Analisis awal yang ditunda (lihat activate). Aman dipanggil berkali-kali.
+  _runInit() {
+    if (!this._initPending) return;
+    this._initPending = false;
+    if (this._initTimer) { clearTimeout(this._initTimer); cancelAnimationFrame(this._initTimer); this._initTimer = null; }
+    if (!this.active) return;
+    this.analyzeAll();
+    CanvasEngine.compositeAll();
+  },
+
+  // Neon kasar tiap bagian dibuat BERGILIRAN (paling besar dulu, bagian terpilih paling dulu), maksimal ~10 ms per giliran,
+  // supaya layar tidak macet (dulu semua bagian dibuat sekaligus saat aktif dan setiap habis menarik).
+  // Neon kasar bagian terpilih dibuat SEKARANG (murah, beberapa ms per bagian) supaya setelah menarik / memilih semua
+  // bagian terpilih langsung bergaris neon; yang tidak terpilih baru dibuat bergiliran di _neonTick.
+  _neonSelectedNow() {
+    (this.selAll || []).forEach(e => {
+      const rec = this.recs[e.layerId];
+      if (!rec) return;
+      const ids = (rec.group && rec.group.id === e.id) ? rec.group.members : [e.id];
+      ids.forEach(id => {
+        const p = rec.parts[id];
+        if (!p || p.neon || !p._list) return;
+        try { p.neon = this._makeNeon(p._list, p.cbox, p._lw, p._s, p._glow2); } catch (err) { console.error("Mesh- neon gagal:", err); p.neon = { canvas: null }; }
+        p._list = null;
+      });
+    });
+  },
+
+  _scheduleNeons() {
+    if (this._neonTimer) return;
+    this._neonTimer = setTimeout(() => this._neonTick(), 0);
+  },
+
+  _neonTick() {
+    this._neonTimer = null;
+    if (!this.active) return;
+    if (this.pull || this.down || this._initPending) { this._neonTimer = setTimeout(() => this._neonTick(), 120); return; }
+    const todo = [];
+    const selByLayer = {};
+    (this.selAll || []).forEach(e => { selByLayer[e.layerId] = e.id; });
+    this.order.forEach(lid => {
+      const rec = this.recs[lid];
+      if (!rec) return;
+      Object.keys(rec.parts).forEach(k => {
+        const p = rec.parts[k];
+        if (p.neon || !p._list) return;
+        const sel = selByLayer[lid] === p.id || (rec.group && selByLayer[lid] === rec.group.id && rec.group.lut[p.id]);
+        todo.push({ p, pri: sel ? 1e12 : p.area });
+      });
+    });
+    if (!todo.length) return;
+    todo.sort((a, b) => b.pri - a.pri);
+    const t0 = performance.now();
+    let built = 0;
+    for (let i = 0; i < todo.length; i++) {
+      const p = todo[i].p;
+      try { p.neon = this._makeNeon(p._list, p.cbox, p._lw, p._s, p._glow2); } catch (err) { console.error("Mesh- neon gagal:", err); p.neon = { canvas: null }; }
+      p._list = null;
+      built++;
+      if (performance.now() - t0 > 18) break;
+    }
+    if (built) CanvasEngine.compositeAll();
+    if (todo.length > built) this._neonTimer = setTimeout(() => this._neonTick(), 6);
+  },
+
+  _freeRec(rec) {
+    if (!rec || !rec.parts) return;
+    this._dropGroup(rec);
+    Object.keys(rec.parts).forEach(k => {
+      const nn = rec.parts[k].neon;
+      if (nn && nn.canvas) this._freeCanvas(nn.canvas);
+      this._dropPrep(rec.parts[k]);
+    });
+  },
+
+  // Analisis ulang yang tertunda (setelah tarikan): jalankan sekarang tanpa menggambar ulang.
+  _runPending() {
+    const id = this._pendingAnalyze;
+    if (id == null) return;
+    if (!this.active) { this._pendingAnalyze = null; this._analyzing = false; return; }
+    const stale = this.dirty || this._sig !== this._signature();
+    this.analyzeAll(stale || this._pendingMulti ? undefined : id);
+  },
+
+  // Sama seperti _runPending, lalu gambar ulang kanvas (dipanggil di luar proses menggambar).
+  _flushAnalyze() {
+    if (this._pendingAnalyze == null) return;
+    this._runPending();
+    CanvasEngine.compositeAll();
+  },
+
+  _usable(layer, project) {
+    if (!layer || layer.locked || layer.visible === false) return false;
+    if (typeof MeshTransformEngine !== "undefined" && MeshTransformEngine.findTransformForLayer(project, layer.id)) return false;
+    return true;
+  },
+
+  // Warna neon = warna aksen tema yang sedang dipakai (variabel CSS --accent). Dibaca ulang tiap 0,4 detik.
+  _themeColor() {
+    const now = Date.now();
+    if (this._colorAt && now - this._colorAt < 400) return this._color;
+    let c = "";
+    try { c = getComputedStyle(document.documentElement).getPropertyValue("--accent").trim(); } catch (e) { c = ""; }
+    this._color = c || "#00e5ff";
+    this._colorAt = now;
+    return this._color;
+  },
+
+  _signature() {
+    const project = ProjectStore.getProject();
+    if (!project) return "";
+    return this.targetLayers().map(l => l.id).join(",") + "|" + project.currentFrame + "|" + this.gap + "|" + this.colorTol + "|" + this.dividers.length + "|" + this._themeColor();
+  },
+
+  // Perlu analisis ulang? (layer yang dicentang berubah, frame pindah, undo, dst)
+  _ensureFresh() {
+    if (!this.active || this.pull || this.down || this._initPending) return;
+    if (this._pendingAnalyze != null) return;   // sedang menunggu analisis setelah tarikan (dijalankan 1 frame lagi)
+    if (this.dirty || this._sig !== this._signature() || this._layersChanged()) this.analyzeAll();
+  },
+
+  _layerHash(layer) {
+    const cv = layer && CanvasEngine.ensureLayerCanvas(layer);
+    return cv ? this._underHash(cv) : "";
+  },
+
+  // Gambar layer berubah dari luar (Undo/Redo, goresan lain) tanpa kabar lewat event? Bandingkan sidik gambar sekarang
+  // dengan sidik saat dianalisis. Kalau beda, analisis (neon, bagian, data siap-tarik) sudah basi.
+  _layersChanged() {
+    const ids = Object.keys(this.recs || {});
+    for (let i = 0; i < ids.length; i++) {
+      const rec = this.recs[ids[i]];
+      if (!rec || !rec.hash) continue;
+      const layer = ProjectStore.getLayerById(ids[i]);
+      if (!layer) continue;
+      if (rec.hash !== this._layerHash(layer)) return true;
+    }
+    return false;
+  },
+
+  // Pilihan dipertahankan lewat titik di dalam bagian (id bagian bisa berganti tiap analisis ulang).
+  _reselect() {
+    if (this.selPts && this.selPts.length > 1) return this._reselectMulti();
+    this._dropGroups();
+    this.selected = null;
+    this.selPts = [];
+    this.selAll = [];
+    const sp = this.selPoint;
+    if (!sp) return;
+    const rec = this.recs[sp.layerId];
+    if (!rec) return;
+    let id = this._labelNear(rec, sp.x, sp.y, CanvasEngine.getTouchRadius() * 1.5);
+    const keep = this._pullKeepSelection;
+    if (!id && keep && keep.layerId === sp.layerId) {
+      for (let i = 0; i < keep.pts.length && !id; i++) {
+        id = this._labelNear(rec, keep.pts[i].x, keep.pts[i].y, CanvasEngine.getTouchRadius() * 0.5);
+        if (id) this.selPoint = { layerId: sp.layerId, x: keep.pts[i].x, y: keep.pts[i].y };
+      }
+    }
+    if (!id && keep && keep.layerId === sp.layerId && keep.bbox) {
+      // cadangan: pilih bagian baru yang paling banyak tumpang-tindih dengan kotak bagian lama
+      let best = 0;
+      const o = keep.bbox;
+      Object.keys(rec.parts).forEach(k => {
+        const b = rec.parts[k].bbox;
+        const ix = Math.min(o.x + o.w, b.x + b.w) - Math.max(o.x, b.x);
+        const iy = Math.min(o.y + o.h, b.y + b.h) - Math.max(o.y, b.y);
+        const ov = ix > 0 && iy > 0 ? ix * iy : 0;
+        if (ov > best) { best = ov; id = rec.parts[k].id; }
+      });
+      if (id) {
+        const pp = rec.parts[id].bbox;
+        this.selPoint = { layerId: sp.layerId, x: pp.x + pp.w / 2, y: pp.y + pp.h / 2 };
+        const c = this._labelNear(rec, this.selPoint.x, this.selPoint.y, 1e9);
+        if (c !== id) this.selPoint = { layerId: sp.layerId, x: sp.x, y: sp.y };
+      }
+    }
+    if (id) { this.selected = { layerId: sp.layerId, id }; this.selPts = [{ layerId: sp.layerId, id, x: this.selPoint.x, y: this.selPoint.y }]; this.selAll = [this.selected]; }
+    this._refineSoon();
+  },
+
+  // Neon halus dibuat sebentar SETELAH layar sempat tergambar (tap terasa langsung, tidak menunggu).
+  _refineSoon() {
+    const todo = this._selEntries().some(e => { const p = this._findPart(e); return p && !p.refined; });
+    if (!todo) { this._prewarmSoon(); return; }
+    if (this._refineTimer) return;
+    this._refineTimer = setTimeout(() => {
+      this._refineTimer = null;
+      if (!this.active) return;
+      if (this.pull || this.down) { this._refineSoon(); return; }
+      this._refineSelected();
+      CanvasEngine.compositeAll();
+      this._prewarmSoon();
+    }, 10);
+  },
+
+  // Bagian yang TERPILIH dapat garis neon yang halus (bukan kotak-kotak peta kecil). Bagian lain tetap versi murah.
+  _refineSelected() {
+    this._selEntries().forEach(e => {
+      const part = this._findPart(e);
+      if (!part || part.refined) return;
+      const rec = this.recs[e.layerId];
+      try {
+        const old = part.neon;
+        part.neon = this._refineNeon(rec, part);
+        part.refined = true;
+        if (old && old.canvas) this._freeCanvas(old.canvas);
+        this._dropPullNeon(e.layerId);   // neon halus siap: gantikan neon sementara hasil tarikan layer itu
+      } catch (err) { console.error("Mesh- neon halus gagal:", err); }
+    });
+  },
+
+  _findPart(sel) {
+    const rec = sel && this.recs[sel.layerId];
+    return this._partById(rec, sel && sel.id);
+  }
+}, "MeshPartEngine");
+
+/*
+  meshpart-fill.js
+  TUGAS     : mengisi area yang ditinggalkan bagian dengan warna pixel terdekat di sekitarnya (misal dahi di bawah rambut jadi warna kulit)
+  BAGIAN DARI: MeshPartEngine
+  DIPANGGIL OLEH: meshpart-warp.js (awal tarikan)
+  MEMANGGIL : tidak ada
+  EVENT     : tidak ada
+  KALAU RUSAK: area yang ditinggalkan bagian bolong / warnanya aneh / lambat saat mulai menarik
+*/
+Modul.extend(MeshPartEngine, "meshpart-fill.js", {
+  // Jarak jangkau warna isian (px kanvas) untuk bagian berukuran b.
+  _fillReach(b) {
+    return Math.ceil(Math.max(30, Math.min(80, Math.max(b.w, b.h) * 0.14)));
+  },
+
+  // Blur kotak (mendatar lalu menurun) HANYA di antara sel yang punya warna (dist >= 0), radius r sel.
+  _blurFill(col, dist, cw, ch, r) {
+    const N = cw * ch;
+    const tmp = new Float32Array(N * 3), cnt = new Float32Array(N);
+    for (let y = 0; y < ch; y++) {
+      for (let x = 0; x < cw; x++) {
+        let a = 0, sr = 0, sg = 0, sb = 0;
+        for (let k = Math.max(0, x - r); k <= Math.min(cw - 1, x + r); k++) {
+          const j = y * cw + k;
+          if (dist[j] < 0) continue;
+          a++; sr += col[j * 3]; sg += col[j * 3 + 1]; sb += col[j * 3 + 2];
+        }
+        const i = y * cw + x;
+        cnt[i] = a; tmp[i * 3] = sr; tmp[i * 3 + 1] = sg; tmp[i * 3 + 2] = sb;
+      }
+    }
+    for (let y = 0; y < ch; y++) {
+      for (let x = 0; x < cw; x++) {
+        const i = y * cw + x;
+        if (dist[i] < 0) continue;
+        let a = 0, sr = 0, sg = 0, sb = 0;
+        for (let k = Math.max(0, y - r); k <= Math.min(ch - 1, y + r); k++) {
+          const j = k * cw + x;
+          a += cnt[j]; sr += tmp[j * 3]; sg += tmp[j * 3 + 1]; sb += tmp[j * 3 + 2];
+        }
+        if (a > 0) { col[i * 3] = sr / a; col[i * 3 + 1] = sg / a; col[i * 3 + 2] = sb / a; }
+      }
+    }
+  },
+
+  // data = RGBA wilayah (rx0,ry0,rw,rh) dengan pixel bagian SUDAH dikosongkan, isPart = penanda pixel bagian (ukuran wilayah).
+  // Hasil: canvas seukuran bbox, berisi warna isian HANYA di pixel milik bagian itu. null = tidak ada yang bisa diisi.
+  _buildFill(data, isPart, rx0, ry0, rw, rh, b) {
+    const AMIN = this.ALPHA_MIN;
+    const maxDist = this._fillReach(b);
+    const f = Math.max(1, Math.ceil(Math.sqrt((rw * rh) / 160000)));
+    const cw = Math.ceil(rw / f), ch = Math.ceil(rh / f);
+    const N = cw * ch;
+
+    const partN = new Uint16Array(N), srcN = new Uint16Array(N);
+    const sr = new Uint32Array(N), sg = new Uint32Array(N), sb = new Uint32Array(N);
+    for (let y = 0; y < rh; y++) {
+      const cy = (y / f) | 0;
+      for (let x = 0; x < rw; x++) {
+        const i = y * rw + x;
+        const c = cy * cw + ((x / f) | 0);
+        if (isPart[i]) { partN[c]++; continue; }
+        const o = i * 4;
+        if (data[o + 3] > 128) { srcN[c]++; sr[c] += data[o]; sg[c] += data[o + 1]; sb[c] += data[o + 2]; }
+      }
+    }
+
+    // warna menjalar dari sel bergambar (bukan bagian ini) ke sel kosong terdekat
+    const col = new Uint8Array(N * 3);
+    const dist = new Int16Array(N).fill(-1);
+    const queue = new Int32Array(N);
+    let qh = 0, qt = 0, any = false;
+    for (let c = 0; c < N; c++) {
+      if (!srcN[c]) continue;
+      col[c * 3] = (sr[c] / srcN[c]) | 0;
+      col[c * 3 + 1] = (sg[c] / srcN[c]) | 0;
+      col[c * 3 + 2] = (sb[c] / srcN[c]) | 0;
+      dist[c] = 0; queue[qt++] = c; any = true;
+    }
+    if (!any) return null;
+    const lim = Math.ceil(maxDist / f);
+    while (qh < qt) {
+      const c = queue[qh++];
+      const dd = dist[c];
+      if (dd >= lim) continue;
+      const x = c % cw, y = (c / cw) | 0;
+      const spread = (j) => {
+        if (dist[j] >= 0) return;
+        dist[j] = dd + 1;
+        col[j * 3] = col[c * 3]; col[j * 3 + 1] = col[c * 3 + 1]; col[j * 3 + 2] = col[c * 3 + 2];
+        queue[qt++] = j;
+      };
+      if (x > 0) spread(c - 1);
+      if (x < cw - 1) spread(c + 1);
+      if (y > 0) spread(c - cw);
+      if (y < ch - 1) spread(c + cw);
+    }
+
+    // haluskan warna isian (rata-rata sel tetangga yang berwarna) supaya tidak bergaris-garis
+    this._blurFill(col, dist, cw, ch, 3);
+    this._blurFill(col, dist, cw, ch, 3);
+
+    // sel bagian yang kebagian warna -> canvas kecil
+    const low = document.createElement("canvas");
+    low.width = cw; low.height = ch;
+    const lc = low.getContext("2d");
+    const limg = lc.createImageData(cw, ch);
+    let filled = 0;
+    for (let c = 0; c < N; c++) {
+      if (!partN[c] || dist[c] < 0 || dist[c] >= lim) continue;
+      limg.data[c * 4] = col[c * 3];
+      limg.data[c * 4 + 1] = col[c * 3 + 1];
+      limg.data[c * 4 + 2] = col[c * 3 + 2];
+      // makin jauh dari warna sumber, makin pudar (di ujung jangkauan hilang halus, tidak berhenti kasar)
+      const fade = Math.min(1, Math.max(0, (lim - dist[c]) / (0.4 * lim)));
+      limg.data[c * 4 + 3] = Math.round(255 * fade);
+      filled++;
+    }
+    if (!filled) return null;
+    lc.putImageData(limg, 0, 0);
+
+    // perbesar (halus) ke ukuran bbox lalu potong sesuai bentuk bagian
+    const out = document.createElement("canvas");
+    out.width = b.w; out.height = b.h;
+    const oc = out.getContext("2d");
+    oc.imageSmoothingEnabled = true;
+    oc.drawImage(low, 0, 0, cw, ch, rx0 - b.x, ry0 - b.y, cw * f, ch * f);
+    const od = oc.getImageData(0, 0, b.w, b.h);
+    for (let y = 0; y < b.h; y++) {
+      const rrow = (b.y - ry0 + y) * rw + (b.x - rx0);
+      for (let x = 0; x < b.w; x++) {
+        if (!isPart[rrow + x]) od.data[(y * b.w + x) * 4 + 3] = 0;
+      }
+    }
+    oc.putImageData(od, 0, 0);
+    return out;
+  }
+}, "MeshPartEngine");
+
+/*
+  meshpart-pointer.js
+  TUGAS     : sentuhan Mesh-: tap = pilih bagian (tap lagi = layer di bawahnya), pegang garis neon lalu tarik = tarik bagian, mode garis pembatas = gambar sekat
+  BAGIAN DARI: MeshPartEngine
+  DIPANGGIL OLEH: canvas-input-route.js (pointerdown/move/up), meshpart-bar.js (_dropStaleTouch dari poll)
+  MEMANGGIL : meshpart-detect.js, meshpart-warp.js, CanvasEngine.getPointerPos, ZoomEngine (cek cubit 2 jari)
+  EVENT     : tidak ada
+  KALAU RUSAK: tap tidak memilih bagian / garis neon tidak bisa ditarik / garis pembatas tidak tergambar / neon hilang setelah zoom
+*/
+Modul.extend(MeshPartEngine, "meshpart-pointer.js", {
+  handlePointerDown(e) {
+    const project = ProjectStore.getProject();
+    if (!project || !this.active) return;
+    // Sentuhan lama yang tidak pernah selesai (jari kedua cubit zoom menelan pointerup-nya): bereskan dulu.
+    this._dropStaleTouch(false);
+    if (this._initPending) this._runInit();   // disentuh sebelum analisis awal sempat jalan: kerjakan sekarang
+    // Analisis ulang yang tertunda setelah tarikan: selesaikan dulu supaya sentuhan ini memakai data terbaru.
+    if (this._pendingAnalyze != null) this._runPending();
+    this._ensureFresh();
+    const pt = CanvasEngine.getPointerPos(e);
+    this.down = null;
+
+    if (this.mode === "divide") {
+      this.liveDivider = [pt];
+      this.down = { type: "divide", pts: this.liveDivider, start: pt, t0: Date.now() };
+      CanvasEngine.compositeAll();
+      return;
+    }
+
+    const touchR = CanvasEngine.getTouchRadius();
+    // Garis neon bagian terpilih (boleh beberapa layer): yang tersentuh jadi pegangan, bagian terpilih lain ikut ditarik.
+    const entries = this._selEntries();
+    for (let k = 0; k < entries.length; k++) {
+      const ent = entries[k];
+      const sel = this._findPart(ent);
+      const layer = ProjectStore.getLayerById(ent.layerId);
+      const rec = this.recs[ent.layerId];
+      if (!sel || !layer || !rec) continue;
+      const lp = this.toLocal(layer, pt, rec.w, rec.h);
+      if (!this._nearContour(sel, lp, touchR * 1.4)) continue;
+      const d = { type: "pull", layerId: layer.id, partId: sel.id, anchor: lp, start: pt, cur: pt, started: false, ready: false, t0: Date.now(), prepTimer: null };
+      // Kerja berat (baca pixel, potong bagian, isi warna) TIDAK dilakukan di detik sentuhan pertama:
+      // kalau ternyata cuma tap atau jari kedua untuk cubit zoom, kerja berat itu sia-sia dan bikin lemot.
+      // Disiapkan saat jari mulai bergerak, atau kalau jari menahan lebih dari 120 ms.
+      this.down = d;
+      // Kalau bagian ini sudah disiapkan lebih dulu (saat dipilih), tarikan siap SEKETIKA. Kalau belum, siapkan sekarang juga.
+      const pp = sel._prep;
+      if (sel._prepJob || (pp && pp.base && pp.base.width)) this._pullEnsureReady(d);
+      else d.prepTimer = setTimeout(() => { d.prepTimer = null; this._pullEnsureReady(d); }, 30);
+      return;
+    }
+    this.down = { type: "tap", start: pt, t0: Date.now() };
+  },
+
+  handlePointerMove(e) {
+    const d = this.down;
+    if (!d || !this.active) return;
+    const pt = CanvasEngine.getPointerPos(e);
+    const touchR = CanvasEngine.getTouchRadius();
+
+    if (d.type === "divide") {
+      const last = d.pts[d.pts.length - 1];
+      if (Math.hypot(pt.x - last.x, pt.y - last.y) < touchR * 0.08) return;
+      d.pts.push(pt);
+      this._requestRedraw(false);
+      return;
+    }
+
+    const moved = Math.hypot(pt.x - d.start.x, pt.y - d.start.y);
+    if (d.type === "tap") {
+      if (moved > touchR * 0.4) d.type = "none";
+      return;
+    }
+    if (d.type === "pull") {
+      if (!d.started) {
+        if (moved < Math.max(2, touchR * 0.05)) return;   // hampir tanpa jarak mati: ikut jari langsung
+        if (this._pinchNow()) return;                      // 2 jari = zoom, bukan tarikan
+        if (!this._pullEnsureReady(d)) { d.type = "tap"; return; }
+        this._pullStart(d);
+        d.started = true;
+      }
+      d.cur = pt;
+      this._requestRedraw(true);
+    }
+  },
+
+  handlePointerUp() {
+    const d = this.down;
+    this.down = null;
+    if (!d || !this.active) return;
+    if (d.prepTimer) { clearTimeout(d.prepTimer); d.prepTimer = null; }
+
+    // Ada jari kedua yang menyentuh sejak sentuhan ini mulai = cubit zoom / geser kanvas, bukan tap atau tarikan baru.
+    const pinched = this._touchWasPinch(d);
+
+    if (d.type === "divide") {
+      this.liveDivider = null;
+      if (!pinched && d.pts.length >= 2) {
+        this.dividers.push(d.pts);
+        this.analyzeAll();
+      }
+      CanvasEngine.compositeAll();
+      return;
+    }
+    if (d.type === "tap") {
+      if (pinched) return;                                 // neon dan pilihan tetap seperti semula
+      this._select(d.start);
+      return;
+    }
+    if (d.type === "pull" && d.started) this._pullCommit(d);
+    else if (d.type === "pull") {
+      this._freePull(d, true);   // cuma menyentuh garis tanpa menarik: lepas kanvas kerja yang sudah disiapkan
+      // ...dan itu artinya TAP biasa: pilih / tambah / keluarkan bagian. Kalau tidak, tap di dekat garis neon bagian terpilih
+      // (yang di gambar bertumpuk ada di mana-mana) tidak pernah bisa membatalkan bagian itu.
+      if (!pinched) this._select(d.start, true);
+    }
+  },
+
+  // Siapkan tarikan (sekali saja). false = gagal (layer terkunci / ukuran tidak cocok), perlakukan sebagai tap.
+  _pullEnsureReady(d) {
+    if (d.ready) return true;
+    if (this.down !== d || d.type !== "pull") return false;
+    if (this._pinchNow()) return false;
+    try {
+      const rec0 = this.recs[d.layerId];
+      const part0 = this._partById(rec0, d.partId);
+      if (part0 && part0._prepJob) this._finishPrepJob(part0);   // persiapan di muka masih setengah jalan: selesaikan sekarang
+      const pp = part0 && part0._prep;
+      if (pp && pp.base && pp.base.width && pp.partC && pp.partC.width) {
+        this._prepKeys().forEach(k => { d[k] = pp[k]; });   // data yang sudah disiapkan sebelumnya: tanpa hitung ulang
+        d.rect = null; d.fromCache = true;
+        this._pullCenter(d);
+        d.ready = true;
+      } else d.ready = !!this._pullPrepare(d);
+      if (d.ready && d.subs === undefined) this._pullReadySubs(d);   // bagian terpilih di layer lain ikut disiapkan
+    } catch (err) { console.error("Mesh- siapkan tarikan gagal:", err); d.ready = false; }
+    return d.ready;
+  },
+
+  // Dua jari sedang menyentuh kanvas (cubit zoom).
+  _pinchNow() {
+    const z = typeof ZoomEngine !== "undefined" ? ZoomEngine : null;
+    return !!(z && z.pointers && z.pointers.size >= 2);
+  },
+
+  // Apakah jari kedua pernah turun sejak sentuhan d dimulai?
+  _touchWasPinch(d) {
+    const z = typeof ZoomEngine !== "undefined" ? ZoomEngine : null;
+    if (!z) return false;
+    if (z._secondPointerDownAt && z._secondPointerDownAt >= d.t0) return true;
+    return this._pinchNow();
+  },
+
+  // Sentuhan yang tidak pernah ditutup (pointerup-nya ditelan penjaga cubit zoom) membuat neon hilang
+  // dan analisis berhenti sampai kanvas di-tap lagi. Di sini sentuhan itu diselesaikan / dibuang.
+  // fromPoll = true: hanya dibuang kalau memang tidak ada jari di layar sama sekali.
+  _dropStaleTouch(fromPoll) {
+    const d = this.down;
+    if (!d) return;
+    if (fromPoll) {
+      const z = typeof ZoomEngine !== "undefined" ? ZoomEngine : null;
+      if (!(z && z.pointers && z.pointers.size === 0)) return;
+      if (Date.now() - (d.t0 || 0) < 600) return;
+    }
+    this.down = null;
+    if (d.prepTimer) { clearTimeout(d.prepTimer); d.prepTimer = null; }
+    if (d.type === "divide") this.liveDivider = null;
+    if (d.type === "pull") {
+      if (d.started && this.pull === d) this._pullCommit(d);   // tarikan yang sudah berjalan: simpan apa adanya
+      else this._freePull(d, true);
+    }
+    CanvasEngine.compositeAll();
+  },
+
+  // Gambar ulang paling banyak 1x per frame layar.
+  _requestRedraw(isPull) {
+    if (this._rafPending) return;
+    this._rafPending = true;
+    requestAnimationFrame(() => {
+      this._rafPending = false;
+      const d = this.down;
+      if (isPull && d && d.type === "pull" && d.started) this._pullRender(d, false);
+      else CanvasEngine.compositeAll();
+    });
+  },
+
+  // Pilih bagian di titik tap.
+  //  - belum ada pilihan: tap = pilih bagian itu
+  //  - ada pilihan, tap bagian LAIN (layer mana pun) = TAMBAH ke pilihan (bisa ditarik barengan)
+  //  - tap bagian yang sudah ikut terpilih (kalau pilihan lebih dari 1) = keluarkan dari pilihan
+  //  - tap satu-satunya bagian terpilih = pindah ke layer di bawahnya (kalau ada layer bertumpuk)
+  //  - tap kosong = batal semua
+  _select(pt, fromContour) {
+    const touchR = CanvasEngine.getTouchRadius();
+    const oldParts = this._selEntries().map(e => this._findPart(e)).filter(Boolean);
+    this._dropPullNeon();
+    const cands = [];
+    for (let k = this.order.length - 1; k >= 0; k--) {
+      const lid = this.order[k];
+      const rec = this.recs[lid];
+      const layer = ProjectStore.getLayerById(lid);
+      if (!rec || !layer) continue;
+      const lp = this.toLocal(layer, pt, rec.w, rec.h);
+      const id = this._labelNear(rec, lp.x, lp.y, touchR * 0.8);
+      if (id) cands.push({ layerId: lid, id, x: lp.x, y: lp.y });
+    }
+    let pts = [];
+    const cur = this.selPts || [];
+    if (!cands.length && fromContour) { this._updateHint(); CanvasEngine.compositeAll(); return; }   // sentuh garis neon di luar bagian: pilihan tetap
+    if (!cands.length) {
+      pts = [];
+    } else if (!cur.length) {
+      pts = [cands[0]];
+    } else {
+      const top = cands[0];
+      const has = cur.findIndex(c => c.layerId === top.layerId && c.id === top.id);
+      if (cur.length === 1 && has === 0) {                          // tap satu-satunya bagian terpilih: layer di bawahnya
+        pts = [cands[1 % cands.length]];
+      } else if (has >= 0) pts = cur.filter((c, i) => i !== has);   // keluarkan dari pilihan
+      else pts = cur.concat([top]);                                  // tambah ke pilihan (layer mana pun)
+    }
+    this._setSelection(pts);
+    const keepNow = this._selEntries().map(e => this._findPart(e));
+    oldParts.forEach(p => { if (keepNow.indexOf(p) < 0) this._dropPrep(p); });
+    this._updateHint();
+    CanvasEngine.compositeAll();     // pilihan tampil langsung (neon kasar), neon halus menyusul sebentar lagi
+    this._refineSoon();
+  },
+
+  _nearContour(part, lp, R) {
+    const pts = part.pts;
+    const R2 = R * R;
+    for (let k = 0; k < pts.length; k += 2) {
+      const dx = pts[k] - lp.x, dy = pts[k + 1] - lp.y;
+      if (dx * dx + dy * dy < R2) return true;
+    }
+    return false;
+  }
+}, "MeshPartEngine");
+
+/*
+  meshpart-warp.js
+  TUGAS     : menggerakkan tarikan: mulai tarik, bagian layer lain ikut, gambar ulang tiap gerak jari (grid segitiga), pengaturan kehalusan
+  BAGIAN DARI: MeshPartEngine
+  DIPANGGIL OLEH: meshpart-pointer.js
+  MEMANGGIL : meshpart-prep.js, meshpart-commit.js, MeshEngine.drawWarpedTriangle, HistoryEngine.snapshot
+  EVENT     : tidak ada
+  KALAU RUSAK: bagian lain ikut bergerak / patah-patah saat ditarik / garis tipis putus / layer lain tidak ikut
+*/
+Modul.extend(MeshPartEngine, "meshpart-warp.js", {
+  // Dipanggil saat jari BENAR-BENAR mulai menarik: baru sekarang riwayat Undo dicatat (tap saja tidak membuat langkah Undo kosong).
+  _pullStart(d) {
+    const layer = ProjectStore.getLayerById(d.layerId);
+    if (!layer) return;
+    const project = ProjectStore.getProject();
+    if (project.activeLayerId !== layer.id) ProjectStore.setActiveLayer(layer.id);
+    if (typeof HistoryEngine !== "undefined") HistoryEngine.snapshot();
+    if (CanvasEngine.meshPreviewCanvases) delete CanvasEngine.meshPreviewCanvases[layer.id];
+    d.t0 = performance.now();
+    d._g = null;
+    const cv0 = CanvasEngine.ensureLayerCanvas(layer);
+    d.preHash = cv0 ? this._underHash(cv0) : "";
+    d.under = cv0 ? this._underGet(layer, cv0) : null;   // pixel bagian lain yang tadinya tertutup bagian ini (kalau ada)
+    this.pull = d;
+    (d.subs || []).forEach(sd => {
+      const l2 = ProjectStore.getLayerById(sd.layerId);
+      if (!l2) return;
+      if (CanvasEngine.meshPreviewCanvases) delete CanvasEngine.meshPreviewCanvases[l2.id];
+      sd.t0 = d.t0; sd._g = null;
+      const c2 = CanvasEngine.ensureLayerCanvas(l2);
+      sd.preHash = c2 ? this._underHash(c2) : "";
+      sd.under = c2 ? this._underGet(l2, c2) : null;
+      sd.started = true;
+    });
+    this._growLoop(d);
+  },
+
+  // Bagian terpilih di layer LAIN ikut ditarik: tiap layer punya tarikan sendiri (sd) yang digerakkan jari yang sama,
+  // walau bagiannya tidak tersentuh (titik pegangnya = tepi bagian itu yang terdekat dengan sentuhan).
+  _pullReadySubs(d) {
+    d.subs = [];
+    (this.selAll || []).forEach(e => {
+      if (e.layerId === d.layerId) return;
+      const layer = ProjectStore.getLayerById(e.layerId);
+      const rec = this.recs[e.layerId];
+      const part = this._partById(rec, e.id);
+      if (!layer || layer.locked || !rec || !part) return;
+      const sd = { type: "pull", layerId: e.layerId, partId: e.id, anchor: this.toLocal(layer, d.start, rec.w, rec.h), start: d.start, cur: d.start, started: false, ready: false, sub: true, noComposite: true };
+      try {
+        if (part._prepJob) this._finishPrepJob(part);
+        const pp = part._prep;
+        if (pp && pp.base && pp.base.width && pp.partC && pp.partC.width) {
+          this._prepKeys().forEach(k => { sd[k] = pp[k]; });
+          sd.rect = null; sd.fromCache = true;
+          this._pullCenter(sd);
+          sd.ready = true;
+        } else sd.ready = !!this._pullPrepare(sd);
+      } catch (err) { console.error("Mesh- siapkan tarikan layer lain gagal:", err); sd.ready = false; }
+      if (!sd.ready) { this._freeSub(sd, false); return; }
+      d.subs.push(sd);
+    });
+  },
+
+  _freeSub(sd, keep) {
+    const free = (c) => { if (c) { try { c.width = 0; c.height = 0; } catch (e) { /* abaikan */ } } };
+    if (!(keep && sd.fromCache)) { free(sd.base); free(sd.partC); free(sd.fillC); }
+    sd.base = sd.partC = sd.fillC = null; sd._fb = null;
+  },
+
+  // Selama jari menahan, pengaruh tarikan terus melebar (sampai 2.5 detik) walau jari tidak bergerak.
+  _growLoop(d) {
+    if (this.pull !== d) return;
+    if (performance.now() - d.t0 >= 2600) return;
+    this._requestRedraw(true);
+    requestAnimationFrame(() => this._growLoop(d));
+  },
+
+  // Ukuran Mesh- (tombol ukuran) = batas daerah yang boleh ikut tertarik.
+  pullRadius(b) {
+    let t = 0.5;
+    if (typeof BrushSizeEngine !== "undefined" && BrushSizeEngine.getMeshPartSize) {
+      const size = BrushSizeEngine.getMeshPartSize();
+      t = (size - BrushSizeEngine.MIN_SIZE) / (BrushSizeEngine.MAX_SIZE - BrushSizeEngine.MIN_SIZE);
+      t = Math.min(1, Math.max(0, t));
+    }
+    // Batas bawah ikut zoom: getTouchRadius() = 26 px LAYAR dalam satuan layer, jadi makin di-zoom makin kecil
+    // (area tarikan terkecil tetap seukuran ujung jari ~14 px layar, bukan membengkak saat gambar diperbesar).
+    const tr = (CanvasEngine.getTouchRadius && CanvasEngine.getTouchRadius()) || 40;
+    const floor = Math.max(5, Math.min(22, tr * 0.55));
+    return floor + Math.pow(t, 1.6) * 0.3 * Math.max(b.w, b.h);
+  },
+
+  // Titik-titik kandidat (koordinat layer) untuk menemukan bagian yang baru saja ditarik.
+  _keepPoints(d, lp) {
+    const b = d.bbox;
+    const cx = b.x + b.w / 2, cy = b.y + b.h / 2;
+    const mx = lp.x, my = lp.y;
+    const out = [];
+    [0, 0.08, 0.16, 0.3, 0.5, 0.75, 1].forEach(t => out.push({ x: mx + (cx - mx) * t, y: my + (cy - my) * t }));
+    out.push({ x: d.center ? d.center.x : d.anchor.x, y: d.center ? d.center.y : d.anchor.y });
+    return out;
+  },
+
+  // Kanvas kerja yang dipakai ulang tiap frame (tumbuh saja, tidak dibuat baru terus: bikin lemot & boros memori di HP).
+  _poolCanvas(key, w, h) {
+    const P = this._pool || (this._pool = {});
+    let c = P[key];
+    if (!c) { c = document.createElement("canvas"); P[key] = c; }
+    if (c.width < w || c.height < h) {
+      c.width = Math.max(c.width, w, 1);
+      c.height = Math.max(c.height, h, 1);
+    }
+    const x = c.getContext("2d");
+    x.setTransform(1, 0, 0, 1, 0, 0);
+    x.globalCompositeOperation = "source-over";
+    x.globalAlpha = 1;
+    x.clearRect(0, 0, c.width, c.height);
+    return c;
+  },
+
+  // Lepas semua kanvas kerja tarikan setelah selesai.
+  // keep = true: tarikan tidak jadi dipakai (cuma sentuh); data siap-pakai yang disimpan di muka (d.fromCache) dibiarkan hidup.
+  _freePull(d, keep) {
+    const free = (c) => { if (c) { try { c.width = 0; c.height = 0; } catch (e) { /* abaikan */ } } };
+    if (d && d.subs) { d.subs.forEach(sd => this._freeSub(sd, keep)); d.subs = undefined; }
+    if (d) {
+      if (!(keep && d.fromCache)) { free(d.base); free(d.partC); free(d.fillC); }
+      d.base = d.partC = d.fillC = null; d._fb = null;
+    }
+    const P = this._pool;
+    if (P) { Object.keys(P).forEach(k => free(P[k])); this._pool = null; }
+  },
+
+  _mkCanvas(w, h) {
+    const c = document.createElement("canvas");
+    c.width = Math.max(1, w); c.height = Math.max(1, h);
+    return c;
+  },
+
+  // Sesuaikan kerapatan grid saat menarik dengan kecepatan HP: terlalu lambat -> grid lebih kasar, ngebut -> lebih rapat.
+  _tuneGrid(ms) {
+    let c = this._gridCells || 9;
+    if (ms > 22) c *= 0.85; else if (ms < 10) c *= 1.08;
+    this._gridCells = Math.max(5, Math.min(14, c));
+    let p = this._pvScale || 0.6;
+    if (ms > 22) p *= 0.92; else if (ms < 10) p *= 1.04;
+    this._pvScale = Math.max(0.4, Math.min(0.8, p));
+  },
+
+  // Simpan gambar hasil tarikan ke layer berjalan di belakang layar dan memancarkan event "layer"/"cel" saat selesai.
+  // Event itu BUKAN perubahan gambar baru: tandai supaya Mesh- tidak menganalisis ulang lagi (itu yang bikin lemot kedua kalinya).
+  _markSelfSave(layerId, ids) {
+    const tok = ++this._saveTok;
+    this._selfSave = { id: layerId, ids: ids || null, tok };
+    const clear = () => { if (this._selfSave && this._selfSave.tok === tok) this._selfSave = null; };
+    const p = CanvasEngine._pendingStrokeEncode;
+    if (p && typeof p.then === "function") p.then(clear, clear);
+    setTimeout(clear, 8000);
+  },
+
+  // Cara kerja Mesh+ (grid segitiga) tapi LOKAL: hanya pixel milik bagian itu (d.partC) yang di-warp, bagian lain tidak disentuh.
+  // Tiap titik grid digeser sebesar gerakan jari x bobot (turun menurut jarak dari titik pegang, radius = ukuran Mesh-).
+  // Grid hanya di sekitar titik pegang; radius pengaruh makin lebar selama jari menahan. Bagian yang tidak bergeser digambar apa adanya,
+  // yang bergeser digambar per segitiga (MeshEngine.drawWarpedTriangle).
+  // Selagi jari bergerak: kanvas kerja lebih kecil (seperti Mesh+). Saat dilepas: ukuran penuh + grid rapat.
+  // Area yang ditinggalkan bagian DIBIARKAN KOSONG; bagian LAIN di layer yang sama tidak pernah tersentuh; bagian yang ditarik selalu di DEPAN bagian lain.
+  _pullRender(d, fine) {
+    const T = performance.now();
+    (d.subs || []).forEach(sd => { sd.cur = d.cur; this._pullRenderOne(sd, fine); });   // layer lain dulu, layer yang disentuh terakhir (dia yang menggambar ulang layar)
+    this._pullRenderOne(d, fine);
+    if (!fine && d.subs && d.subs.length) this._tuneGrid(performance.now() - T);          // kerapatan grid menyesuaikan TOTAL waktu semua layer
+  },
+
+  _pullRenderOne(d, fine) {
+    const layer = ProjectStore.getLayerById(d.layerId);
+ const rec = this.recs[d.layerId];
+    if (!layer || !rec || !d.base || !d.partC) return;
+    const cv = CanvasEngine.ensureLayerCanvas(layer);
+    if (!cv) return;
+    const T0 = (typeof performance !== "undefined") ? performance.now() : 0;
+    const lp = this.toLocal(layer, d.cur, rec.w, rec.h);
+    const b = d.bbox;
+    const dx = lp.x - d.anchor.x, dy = lp.y - d.anchor.y;     // gerakan jari sejak menyentuh
+
+    // Radius pengaruh: ukuran Mesh- x pertumbuhan menurut lamanya jari menahan (makin lama makin jauh, sampai 3x).
+    // Saat dilepas (fine) dipakai nilai terakhir yang terlihat, supaya bentuk tidak melompat.
+    if (!fine || d._g == null) {
+      const e = Math.min(1, (performance.now() - (d.t0 || performance.now())) / 2500);
+      d._g = 1 + (1 - (1 - e) * (1 - e));   // 1x -> 2x
+    }
+    const R = this.pullRadius(b) * 1.6 * d._g;   // R = jangkauan pengaruh; di luar R tidak ada yang bergerak sama sekali
+    const R2 = R * R;
+    const cens = d.centers && d.centers.length ? d.centers : [d.center];   // titik pegang di tepi bagian (gabungan: satu per anggota)
+
+    // Grid HANYA di sekitar titik pegang (jarak > 2.5 R tidak bergerak sama sekali), jadi bagian jauh (misal sisi kanan
+    // gambar yang sama) tidak ikut tertarik, dan grid bisa rapat tanpa berat.
+    const half = R;
+    let ux0 = Infinity, uy0 = Infinity, ux1 = -Infinity, uy1 = -Infinity;
+    cens.forEach(c => { ux0 = Math.min(ux0, c.x); uy0 = Math.min(uy0, c.y); ux1 = Math.max(ux1, c.x); uy1 = Math.max(uy1, c.y); });
+    const gx0 = Math.max(b.x, ux0 - half), gy0 = Math.max(b.y, uy0 - half);
+    const gx1 = Math.min(b.x + b.w, ux1 + half), gy1 = Math.min(b.y + b.h, uy1 + half);
+    const gw = gx1 - gx0, gh = gy1 - gy0;
+    if (gw < 1 || gh < 1) return;
+    const cs = Math.max(fine ? R / 8 : R / 4, Math.max(gw, gh) / (fine ? 34 : (this._gridCells || 9) + 5), 1.5);
+    const nx = Math.max(2, Math.ceil(gw / cs) + 1), ny = Math.max(2, Math.ceil(gh / cs) + 1);
+    const V = nx * ny;
+    const sxs = new Float32Array(V), sys = new Float32Array(V), dxs = new Float32Array(V), dys = new Float32Array(V), mov = new Uint8Array(V);
+    let mnx = b.x, mny = b.y, mxx = b.x + b.w, mxy = b.y + b.h;
+    for (let j = 0; j < ny; j++) {
+      const gy = gy0 + j * gh / (ny - 1);
+      for (let i = 0; i < nx; i++) {
+        const gx = gx0 + i * gw / (nx - 1);
+        const k = j * nx + i;
+        let r2 = Infinity;
+        for (let q = 0; q < cens.length; q++) { const e2 = (gx - cens[q].x) * (gx - cens[q].x) + (gy - cens[q].y) * (gy - cens[q].y); if (e2 < r2) r2 = e2; }
+        // bobot turun halus dari 1 (titik pegang) ke 0 tepat di jarak R, lalu 0: bagian jauh benar-benar terkunci
+        let w = 0;
+        if (r2 < R2) { const q = 1 - r2 / R2; w = q * q; }
+        if (w < 0.003) w = 0;
+        sxs[k] = gx - b.x; sys[k] = gy - b.y;
+        dxs[k] = gx + dx * w; dys[k] = gy + dy * w;
+        mov[k] = w > 0 ? 1 : 0;
+        if (w > 0) {
+          if (dxs[k] < mnx) mnx = dxs[k]; if (dxs[k] > mxx) mxx = dxs[k];
+          if (dys[k] < mny) mny = dys[k]; if (dys[k] > mxy) mxy = dys[k];
+        }
+      }
+    }
+
+    // wilayah kerja (dijepit ke layer)
+    const x0r = Math.max(0, Math.floor(mnx) - 2), y0r = Math.max(0, Math.floor(mny) - 2);
+    const x1r = Math.min(rec.w, Math.ceil(mxx) + 2), y1r = Math.min(rec.h, Math.ceil(mxy) + 2);
+    const rw = x1r - x0r, rh = y1r - y0r;
+    if (rw < 1 || rh < 1) return;
+    let X0 = Math.min(x0r, b.x), Y0 = Math.min(y0r, b.y), X1 = Math.max(x1r, b.x + b.w), Y1 = Math.max(y1r, b.y + b.h);
+    if (d.rect) { X0 = Math.min(X0, d.rect.x0); Y0 = Math.min(Y0, d.rect.y0); X1 = Math.max(X1, d.rect.x1); Y1 = Math.max(Y1, d.rect.y1); }
+    X0 = Math.max(0, X0); Y0 = Math.max(0, Y0); X1 = Math.min(rec.w, X1); Y1 = Math.min(rec.h, Y1);
+    d.rect = { x0: X0, y0: Y0, x1: X1, y1: Y1 };
+
+    const sc = fine ? 1 : (this._pvScale || 0.6);
+    const ww = Math.max(1, Math.ceil(rw * sc)), wh = Math.max(1, Math.ceil(rh * sc));
+
+    // bagian yang sudah di-warp (kanvas kerja)
+    const wp = this._poolCanvas("wp", ww, wh);
+    const wx = wp.getContext("2d");
+    wx.setTransform(sc, 0, 0, sc, -x0r * sc, -y0r * sc);
+    wx.imageSmoothingEnabled = true;
+    // 1) seluruh bagian apa adanya, kecuali kotak-kotak grid yang bergeser (dilubangi supaya tidak muncul dua kali)
+    wx.save();
+    wx.beginPath();
+    wx.rect(b.x, b.y, b.w, b.h);
+    for (let j = 0; j < ny - 1; j++) {
+      for (let i = 0; i < nx - 1; i++) {
+        const i0 = j * nx + i, i1 = i0 + 1, i2 = i0 + nx, i3 = i2 + 1;
+        if (mov[i0] || mov[i1] || mov[i2]) { wx.moveTo(b.x + sxs[i0], b.y + sys[i0]); wx.lineTo(b.x + sxs[i1], b.y + sys[i1]); wx.lineTo(b.x + sxs[i2], b.y + sys[i2]); wx.closePath(); }
+        if (mov[i1] || mov[i3] || mov[i2]) { wx.moveTo(b.x + sxs[i1], b.y + sys[i1]); wx.lineTo(b.x + sxs[i3], b.y + sys[i3]); wx.lineTo(b.x + sxs[i2], b.y + sys[i2]); wx.closePath(); }
+      }
+    }
+    wx.clip("evenodd");
+    wx.drawImage(d.partC, b.x, b.y);
+    wx.restore();
+    // 2) segitiga yang bergeser: warp per segitiga (rumus sama dengan Mesh+)
+    const P = (k) => ({ x: sxs[k], y: sys[k] });
+    const Q = (k) => ({ x: dxs[k], y: dys[k] });
+    for (let j = 0; j < ny - 1; j++) {
+      for (let i = 0; i < nx - 1; i++) {
+        const i0 = j * nx + i, i1 = i0 + 1, i2 = i0 + nx, i3 = i2 + 1;
+        if (mov[i0] || mov[i1] || mov[i2]) MeshEngine.drawWarpedTriangle(wx, d.partC, P(i0), P(i1), P(i2), Q(i0), Q(i1), Q(i2));
+        if (mov[i1] || mov[i3] || mov[i2]) MeshEngine.drawWarpedTriangle(wx, d.partC, P(i1), P(i3), P(i2), Q(i1), Q(i3), Q(i2));
+      }
+    }
+    wx.setTransform(1, 0, 0, 1, 0, 0);
+
+    // Tutup tempat yang ditinggalkan bagian ini, tapi HANYA yang ada di dalam bentuk utuh bagian tetangga (misal wajah bulat),
+    // dengan warna tetangga itu. Di luar bentuk tetangga tetap kosong.
+    let fc = null;
+    if (d.hulls && d.hulls.length) {
+      fc = this._poolCanvas("fc", ww, wh);
+      const fx = fc.getContext("2d");
+      fx.setTransform(sc, 0, 0, sc, -x0r * sc, -y0r * sc);
+      fx.imageSmoothingEnabled = true;
+      d.hulls.forEach(hh => {
+        fx.fillStyle = hh.color; fx.strokeStyle = hh.color; fx.lineWidth = hh.lw; fx.lineJoin = "round";
+        fx.beginPath();
+        hh.poly.forEach((p, i) => { if (i) fx.lineTo(p.x, p.y); else fx.moveTo(p.x, p.y); });
+        fx.closePath();
+        fx.fill(); fx.stroke();
+      });
+      // batasi ke bekas tempat bagian ini (jejak aslinya, tepi dipadatkan supaya tidak ada cincin setengah transparan)
+      const fm = this._poolCanvas("fm", ww, wh);
+      const mx = fm.getContext("2d");
+      mx.setTransform(sc, 0, 0, sc, -x0r * sc, -y0r * sc);
+      for (let i = 0; i < 3; i++) mx.drawImage(d.partC, b.x, b.y);
+      fx.setTransform(1, 0, 0, 1, 0, 0);
+      fx.globalCompositeOperation = "destination-in";
+      fx.drawImage(fm, 0, 0, ww, wh, 0, 0, ww, wh);
+      fx.globalCompositeOperation = "source-over";
+    }
+
+    // tempel ke layer: bagian lain dulu, lalu bagian yang di-warp di depannya
+    const ctx = cv.getContext("2d");
+    ctx.save();
+    ctx.setTransform(1, 0, 0, 1, 0, 0);
+    ctx.globalAlpha = 1;
+    ctx.globalCompositeOperation = "source-over";
+    ctx.beginPath();
+    ctx.rect(X0, Y0, X1 - X0, Y1 - Y0);
+    ctx.clip();
+    ctx.clearRect(X0, Y0, X1 - X0, Y1 - Y0);
+    ctx.imageSmoothingEnabled = true;
+    try { ctx.imageSmoothingQuality = "high"; } catch (e) { /* abaikan */ }
+    if (fc) ctx.drawImage(fc, 0, 0, ww, wh, x0r, y0r, rw, rh);   // tempat bekas bagian ini di dalam bentuk tetangga
+    const U = d.under && d.under.canvas && d.under.canvas.width === rec.w && d.under.canvas.height === rec.h ? d.under.canvas : null;
+    if (U) ctx.drawImage(U, X0, Y0, X1 - X0, Y1 - Y0, X0, Y0, X1 - X0, Y1 - Y0);   // pixel bagian lain yang dulu tertutup: muncul lagi kalau sudah tidak tertutup
+    ctx.drawImage(d.base, X0, Y0, X1 - X0, Y1 - Y0, X0, Y0, X1 - X0, Y1 - Y0);   // bagian lain (tidak tersentuh)
+    ctx.drawImage(wp, 0, 0, ww, wh, x0r, y0r, rw, rh);                            // bagian yang ditarik di DEPAN bagian lain
+    ctx.restore();
+
+    d._last = { wp, ww, wh, x0r, y0r, rw, rh };
+    if (!d.sub) this._pullNeonUpdate(d, wp, ww, wh, x0r, y0r, rw, rh, fine);   // neon ikut bentuk baru, tidak pernah padam
+    if (!fine && T0 && !d.sub && !(d.subs && d.subs.length)) this._tuneGrid(performance.now() - T0);
+    if (!d.noComposite) CanvasEngine.compositeAll();
+  }
+}, "MeshPartEngine");
+
+/*
+  meshpart-capture.js
+  TUGAS     : menyimpan pixel lama yang TERTIMPA goresan baru di layer yang sama (simpanan tersembunyi "under" milik Mesh-),
+              supaya waktu bagian yang menimpa digeser Mesh-, gambar di bawahnya muncul lagi (seperti beda layer)
+  BAGIAN DARI: MeshPartEngine
+  DIPANGGIL OLEH: CanvasEngine.finishStroke (dibungkus di bawah, jalan sekali tiap goresan selesai)
+  MEMANGGIL : HistoryEngine (cadangan "sebelum goresan"), MeshPartEngine._underHash / _mkCanvas
+  EVENT     : tidak ada
+  KALAU RUSAK: gambar bawah tidak muncul lagi saat bagian atas digeser / goresan terasa berat saat diangkat
+*/
+/*
+  CARA KERJA (hemat memori & tidak melambatkan menggambar):
+  - Hanya jalan SETELAH goresan selesai, tidak saat menggambar.
+  - Mencari kotak yang berubah lewat perbandingan peta kecil (1/4 ukuran), lalu hanya kotak itu yang dibaca penuh.
+  - Kalau goresan tidak menimpa gambar lama (digambar di tempat kosong), tidak ada yang disimpan dan tidak ada memori baru.
+  - Simpanan satu kanvas per layer, dibuat hanya saat pertama kali ada yang tertimpa. Maksimal CAP_LAYERS layer sekaligus.
+  - Simpanan dibuang otomatis kalau gambar layer berubah dari luar (Undo, dll): dicek lewat sidik gambar.
+*/
+Modul.extend(MeshPartEngine, "meshpart-capture.js", {
+  CAP_LAYERS: 12,
+  CAP_HIST_PX: 12000000,   // total pixel catatan Undo/Redo simpanan (kotak kecil per goresan)
+  CAP_SKIP: ["mesh-part", "mesh", "mesh-transform", "lasso", "selection", "magic-wand", "move", "image-place", "eyedropper"],
+
+  _capInstall() {
+    if (CanvasEngine.__capWrapped) return;
+    CanvasEngine.__capWrapped = true;
+    const orig = CanvasEngine.finishStroke;
+    CanvasEngine.finishStroke = function () {
+      const r = orig.apply(this, arguments);
+      try { MeshPartEngine._capAfterStroke(); } catch (err) { console.error("Mesh- simpan pixel tertimpa gagal:", err); }
+      return r;
+    };
+  },
+
+  // Perkecil 4x (dua kali separuh) supaya SEMUA pixel ikut dirata-rata (tidak ada goresan tipis yang terlewat).
+  _capShrink(cv) {
+    let cur = cv, made = null;
+    for (let i = 0; i < 2; i++) {
+      const c = this._mkCanvas(Math.max(1, Math.ceil(cur.width / 2)), Math.max(1, Math.ceil(cur.height / 2)));
+      const x = c.getContext("2d", { willReadFrequently: true });
+      x.imageSmoothingEnabled = true;
+      x.drawImage(cur, 0, 0, c.width, c.height);
+      if (made) this._freeCanvas(made);
+      made = cur = c;
+    }
+    return made;
+  },
+
+
+
+  // ---------- simpanan tahan tutup aplikasi (IndexedDB kecil "a2d-meshunder") ----------
+  // Kunci: idProyek|idLayer|frame -> { blob PNG, w, h }. Gagal-aman: kalau IndexedDB tidak ada, tetap jalan (memori saja).
+  _udbOpen() {
+    if (this._udbP) return this._udbP;
+    this._udbP = new Promise((resolve, reject) => {
+      if (typeof indexedDB === "undefined") { reject(new Error("tanpa IndexedDB")); return; }
+      const rq = indexedDB.open("a2d-meshunder", 1);
+      rq.onupgradeneeded = () => { if (!rq.result.objectStoreNames.contains("u")) rq.result.createObjectStore("u"); };
+      rq.onsuccess = () => resolve(rq.result);
+      rq.onerror = () => reject(rq.error);
+    });
+    this._udbP.catch(() => {});
+    return this._udbP;
+  },
+
+  async _udbTx(mode, fn) {
+    const db = await this._udbOpen();
+    return new Promise((resolve, reject) => {
+      const tx = db.transaction("u", mode);
+      let out;
+      const r = fn(tx.objectStore("u"));
+      if (r) r.onsuccess = () => { out = r.result; };
+      tx.oncomplete = () => resolve(out);
+      tx.onerror = () => reject(tx.error);
+      tx.onabort = () => reject(tx.error);
+    });
+  },
+
+  _underKey(layerId, frame) {
+    const p = ProjectStore.getProject();
+    return (p ? p.id : "") + "|" + layerId + "|" + frame;
+  },
+
+  // Simpan ke disk beberapa saat setelah perubahan terakhir (tidak mengganggu menggambar).
+  _underSaveSoon(layerId) {
+    const e = this.under[layerId];
+    if (!e) return;
+    e.dirtyDisk = true;
+    this._udbTimers = this._udbTimers || {};
+    if (this._udbTimers[layerId]) clearTimeout(this._udbTimers[layerId]);
+    const key = this._underKey(layerId, e.frame);
+    this._udbTimers[layerId] = setTimeout(() => {
+      this._udbTimers[layerId] = null;
+      const cur = this.under[layerId];
+      if (!cur || !cur.dirtyDisk || this._underKey(layerId, cur.frame) !== key) return;
+      cur.dirtyDisk = false;
+      try {
+        cur.canvas.toBlob(blob => {
+          if (!blob) return;
+          this._udbTx("readwrite", st => st.put({ blob, w: cur.canvas.width, h: cur.canvas.height }, key)).catch(() => {});
+        }, "image/png");
+      } catch (err) { /* abaikan */ }
+    }, 1200);
+  },
+
+  _underDbDel(layerId, frame) {
+    try { this._udbTx("readwrite", st => st.delete(this._underKey(layerId, frame))).catch(() => {}); } catch (err) { /* abaikan */ }
+  },
+
+  // Bebaskan simpanan di memori TANPA menghapus yang di disk (ganti proyek).
+  _underMemClear() {
+    Object.keys(this.under || {}).forEach(k => { const e = this.under[k]; if (e) this._freeCanvas(e.canvas); });
+    this.under = {};
+  },
+
+  // Muat simpanan layer (frame sekarang) dari disk, kalau belum ada di memori.
+  async _underLoad(layer) {
+    if (!layer || this.under[layer.id]) return;
+    const p = ProjectStore.getProject();
+    if (!p) return;
+    const frame = p.currentFrame;
+    const key = this._underKey(layer.id, frame);
+    this._udbBusy = this._udbBusy || {};
+    if (this._udbBusy[key]) return;
+    this._udbBusy[key] = true;
+    try {
+      const rec = await this._udbTx("readonly", st => st.get(key));
+      if (!rec || !rec.blob || this.under[layer.id]) return;
+      const cur = ProjectStore.getProject();
+      if (!cur || cur.id !== p.id || cur.currentFrame !== frame) return;
+      const bmp = await createImageBitmap(rec.blob);
+      const c = this._mkCanvas(rec.w, rec.h);
+      c.getContext("2d").drawImage(bmp, 0, 0);
+      if (bmp.close) bmp.close();
+      if (!this.under[layer.id]) this.under[layer.id] = { canvas: c, frame, hash: "", hist: [], redo: [], trust: true };
+      else this._freeCanvas(c);
+    } catch (err) { /* tidak ada / gagal: abaikan */ }
+    finally { this._udbBusy[key] = false; }
+  },
+
+  _underLoadProject() {
+    this._underMemClear();
+    const p = ProjectStore.getProject();
+    if (!p) return;
+    (p.layers || []).forEach(l => { this._underLoad(l); });
+  },
+
+  // Samakan simpanan dengan gambar layer sekarang. Kalau layer baru saja di-Undo/Redo, simpanan ikut mundur/maju
+  // lewat catatan kotak kecil per langkah. true = simpanan cocok dan boleh dipakai.
+  _underSync(e, hash, frame, w, h) {
+    if (!e || !e.canvas || e.frame !== frame || e.canvas.width !== w || e.canvas.height !== h) return false;
+    if (e.trust) { e.trust = false; e.hash = hash; return true; }   // dimuat dari disk: percaya, cocokkan sidik sekarang
+    if (e.hash === hash) return true;
+    const ux = e.canvas.getContext("2d", { willReadFrequently: true });
+    const hist = e.hist || (e.hist = []), redo = e.redo || (e.redo = []);
+    for (let k = hist.length - 1; k >= 0; k--) {
+      if (hist[k].before !== hash) continue;
+      for (let m = hist.length - 1; m >= k; m--) {
+        const hh = hist[m];
+        if (hh.prev) ux.putImageData(hh.prev, hh.x, hh.y);
+        redo.push(hh);
+      }
+      hist.length = k;
+      e.hash = hash;
+      return true;
+    }
+    for (let k = redo.length - 1; k >= 0; k--) {
+      if (redo[k].after !== hash) continue;
+      for (let m = redo.length - 1; m >= k; m--) {
+        const hh = redo[m];
+        if (hh.next) ux.putImageData(hh.next, hh.x, hh.y);
+        hist.push(hh);
+      }
+      redo.length = k;
+      e.hash = hash;
+      return true;
+    }
+    return false;
+  },
+
+  // Catat satu perubahan simpanan (kotak sebelum & sesudah) supaya Undo/Redo layer bisa diikuti.
+  _underRecord(e, hashBefore, hashAfter, patch) {
+    const hist = e.hist || (e.hist = []);
+    e.redo = [];
+    hist.push({ before: hashBefore, after: hashAfter, x: patch ? patch.x : 0, y: patch ? patch.y : 0, prev: patch ? patch.prev : null, next: patch ? patch.next : null });
+    let px = 0;
+    for (let i = 0; i < hist.length; i++) if (hist[i].prev) px += hist[i].prev.width * hist[i].prev.height;
+    while (hist.length > 1 && (hist.length > 60 || px > this.CAP_HIST_PX)) {
+      const o = hist.shift();
+      if (o.prev) px -= o.prev.width * o.prev.height;
+    }
+    e.hash = hashAfter;
+    for (const k in this.under) if (this.under[k] === e) { this._underSaveSoon(k); break; }
+  },
+
+  _capAfterStroke() {
+    const tool = CanvasEngine.activeTool;
+    if (this.CAP_SKIP.indexOf(tool) >= 0) return;
+    if (typeof HistoryEngine === "undefined") return;
+    const layer = ProjectStore.getActiveLayer();
+    if (!layer) return;
+    const cv = CanvasEngine.ensureLayerCanvas(layer);
+    if (!cv || !cv.width) return;
+    const key = HistoryEngine._keyOfCanvas(cv);
+    const he = HistoryEngine._open;
+    const pre = he && !he._closed && key !== null && he._before && he._before[key];
+    if (!pre || pre.width !== cv.width || pre.height !== cv.height) return;   // tidak ada cadangan "sebelum goresan": lewati
+
+    const w = cv.width, h = cv.height;
+    const project = ProjectStore.getProject();
+    const frame = project ? project.currentFrame : 0;
+    if (!this.under[layer.id]) this._underLoad(layer);
+    let e = this.under[layer.id];
+    const hPre = this._underHash(pre);
+    if (e && !this._underSync(e, hPre, frame, w, h)) {
+      this._underDrop(layer.id, e.frame !== frame);   // simpanan tidak cocok dengan gambar sebelum goresan: mulai dari nol
+      e = null;
+    }
+
+    // 1. kotak yang berubah (peta kecil)
+    const sa = this._capShrink(pre), sb = this._capShrink(cv);
+    const da = sa.getContext("2d").getImageData(0, 0, sa.width, sa.height).data;
+    const db = sb.getContext("2d").getImageData(0, 0, sb.width, sb.height).data;
+    const sw = sa.width, sh = sa.height;
+    let mnx = sw, mny = sh, mxx = -1, mxy = -1;
+    for (let y = 0; y < sh; y++) {
+      for (let x = 0; x < sw; x++) {
+        const o = (y * sw + x) * 4;
+        if (da[o] !== db[o] || da[o + 1] !== db[o + 1] || da[o + 2] !== db[o + 2] || da[o + 3] !== db[o + 3]) {
+          if (x < mnx) mnx = x; if (x > mxx) mxx = x; if (y < mny) mny = y; if (y > mxy) mxy = y;
+        }
+      }
+    }
+    this._freeCanvas(sa); this._freeCanvas(sb);
+    if (mxx < 0) { if (e) this._underRecord(e, hPre, this._underHash(cv), null); return; }   // tidak ada yang berubah
+    const x0 = Math.max(0, mnx * 4 - 4), y0 = Math.max(0, mny * 4 - 4);
+    const x1 = Math.min(w, (mxx + 1) * 4 + 4), y1 = Math.min(h, (mxy + 1) * 4 + 4);
+    const bw = x1 - x0, bh = y1 - y0;
+
+    // 2. baca kotak itu saja (sebelum & sesudah)
+    const P = pre.getContext("2d").getImageData(x0, y0, bw, bh).data;
+    const Q = cv.getContext("2d").getImageData(x0, y0, bw, bh).data;
+    const erase = tool === "eraser";
+    const todo = [];   // indeks pixel yang perlu diubah di simpanan
+    for (let i = 0; i < bw * bh; i++) {
+      const o = i * 4;
+      const pa = P[o + 3], qa = Q[o + 3];
+      if (pa < 24) continue;
+      if (erase) { if (qa < pa - 8) todo.push(i); continue; }
+      if (qa === 0) continue;
+      const dist = Math.abs(P[o] - Q[o]) + Math.abs(P[o + 1] - Q[o + 1]) + Math.abs(P[o + 2] - Q[o + 2]);
+      if (dist > 30) todo.push(i);
+    }
+    if (!todo.length) { if (e) this._underRecord(e, hPre, this._underHash(cv), null); return; }   // tidak menimpa apa pun: tidak ada yang perlu disimpan
+
+    // 3. perbarui simpanan di kotak itu
+    if (!e) {
+      if (erase) return;   // menghapus tapi belum ada simpanan: tidak ada yang perlu dibersihkan
+      e = this.under[layer.id] = { canvas: this._mkCanvas(w, h), frame, hash: hPre, hist: [], redo: [] };
+      const keys = Object.keys(this.under);
+      while (keys.length > this.CAP_LAYERS) {   // batasi jumlah layer yang menyimpan (yang paling lama dibuang)
+        const k = keys.shift();
+        if (k !== layer.id) this._underDrop(k);
+      }
+    }
+    const ux = e.canvas.getContext("2d", { willReadFrequently: true });
+    const U = ux.getImageData(x0, y0, bw, bh);
+    const prevImg = new ImageData(new Uint8ClampedArray(U.data), bw, bh);
+    const ud = U.data;
+    for (let k = 0; k < todo.length; k++) {
+      const o = todo[k] * 4;
+      if (erase) { ud[o + 3] = 0; continue; }
+      const pa = P[o + 3] / 255, ua = ud[o + 3] / 255, oa = pa + ua * (1 - pa);
+      if (oa <= 0) continue;
+      for (let c = 0; c < 3; c++) ud[o + c] = (P[o + c] * pa + ud[o + c] * ua * (1 - pa)) / oa;
+      ud[o + 3] = oa * 255;
+    }
+    ux.putImageData(U, x0, y0);
+    e.frame = frame;
+    this._underRecord(e, hPre, this._underHash(cv), { x: x0, y: y0, prev: prevImg, next: U });
+  }
+}, "MeshPartEngine");
+// Ganti/buka proyek: muat simpanan miliknya dari disk.
+(function capLoadWait() {
+  if (typeof EventBus !== "undefined" && EventBus.on) {
+    EventBus.on("project:loaded", () => { setTimeout(() => { try { MeshPartEngine._underLoadProject(); } catch (err) { /* abaikan */ } }, 300); });
+    try { if (ProjectStore.getProject()) MeshPartEngine._underLoadProject(); } catch (err) { /* abaikan */ }
+  } else setTimeout(capLoadWait, 150);
+})();
+// CanvasEngine dimuat belakangan dari file ini: pasang pembungkus begitu sudah tersedia.
+(function capWait() {
+  if (typeof CanvasEngine !== "undefined" && typeof CanvasEngine.finishStroke === "function") MeshPartEngine._capInstall();
+  else setTimeout(capWait, 150);
+})();
+
+/*
+  meshpart-overlay.js
+  TUGAS     : menggambar garis neon tiap bagian (terpilih terang, lainnya padam) dan garis pembatas manual di atas kanvas
+  BAGIAN DARI: MeshPartEngine
+  DIPANGGIL OLEH: canvas-compose.js (overlay)
+  MEMANGGIL : meshpart-detect.js (_ensureFresh), meshpart-space.js (applyLayerTransform)
+  EVENT     : tidak ada
+  KALAU RUSAK: garis neon tidak kelihatan / salah tempat / tidak padam saat bagian lain dipilih
+*/
+Modul.extend(MeshPartEngine, "meshpart-overlay.js", {
+  drawOverlay(ctx) {
+    if (!this.active) return;
+    this._ensureFresh();
+
+    // Neon TIDAK PERNAH padam selagi bagian terpilih. Saat menarik, neon bagian itu diganti neon sementara
+    // yang bentuknya ikut jari (this.pullNeons), sampai neon halus bentuk baru siap.
+    const selByLayer = {};
+    (this.selAll || []).forEach(e => { selByLayer[e.layerId] = e.id; });
+    const hasSel = !!(this.selAll && this.selAll.length);
+    const dirtyL = (this._analyzing || this._pendingAnalyze != null) ? this._dirtyLayers : null;
+    this.order.forEach(lid => {
+      const rec = this.recs[lid];
+      const layer = ProjectStore.getLayerById(lid);
+      if (!rec || !layer) return;
+      // neon sementara layer ini (bentuknya ikut jari) dipakai selama menarik / menunggu analisis / neon halus belum siap
+      const pn = this.pullNeons && this.pullNeons[lid];
+      const selPartL = hasSel && selByLayer[lid] != null ? this._partById(rec, selByLayer[lid]) : null;
+      const pnLive = !!(pn && pn.canvas && pn.canvas.width && (this.pull || this._analyzing || !(selPartL && selPartL.refined)));
+      ctx.save();
+      this.applyLayerTransform(ctx, layer, rec.w, rec.h);
+      Object.keys(rec.parts).forEach(key => {
+        const part = rec.parts[key];
+        const isSel = hasSel && selByLayer[lid] === part.id;
+        const inGrp = !!(rec.group && hasSel && selByLayer[lid] === rec.group.id && rec.group.lut[part.id]);
+        if (dirtyL && dirtyL[lid]) return;   // baru ditarik, analisis ulang belum selesai: neon lama basi
+        if (this.pull && !isSel) return;   // selagi menarik, neon bagian lain disembunyikan (menggambar puluhan neon tiap frame bikin lemot)
+        if (isSel && pnLive) return;
+        if (inGrp && this.pull) return;
+        const nn = part.neon;
+        if (!nn || !nn.canvas || !nn.canvas.width) return;
+        ctx.globalAlpha = inGrp ? 0.55 : (isSel ? 1 : (hasSel ? 0.18 : 0.6));
+        ctx.drawImage(nn.canvas, nn.x, nn.y, nn.w, nn.h);
+        if (isSel) ctx.drawImage(nn.canvas, nn.x, nn.y, nn.w, nn.h);
+      });
+      const gp = rec.group;
+      if (gp && hasSel && selByLayer[lid] === gp.id && !pnLive && !(dirtyL && dirtyL[lid])) {
+        const gn = gp.neon;
+        if (gn && gn.canvas && gn.canvas.width) {
+          ctx.globalAlpha = 1;
+          ctx.drawImage(gn.canvas, gn.x, gn.y, gn.w, gn.h);
+          ctx.drawImage(gn.canvas, gn.x, gn.y, gn.w, gn.h);
+        }
+      }
+      if (pnLive) {
+        ctx.globalAlpha = 1;
+        ctx.drawImage(pn.canvas, pn.x, pn.y, pn.w, pn.h);
+        if (!this.pull) ctx.drawImage(pn.canvas, pn.x, pn.y, pn.w, pn.h);
+      }
+      ctx.restore();
+    });
+
+    // Garis pembatas manual (kuning putus-putus).
+    const polys = this.dividers.slice();
+    if (this.liveDivider) polys.push(this.liveDivider);
+    if (polys.length) {
+      const lw = Math.max(2, (CanvasEngine.getTouchRadius() / 26) * 3);
+      ctx.save();
+      ctx.globalAlpha = 1;
+      ctx.strokeStyle = "#ffd400";
+      ctx.lineWidth = lw;
+      ctx.lineCap = "round"; ctx.lineJoin = "round";
+      ctx.setLineDash([lw * 2, lw * 1.5]);
+      polys.forEach(poly => {
+        if (poly.length < 2) return;
+        ctx.beginPath();
+        poly.forEach((p, i) => { if (i === 0) ctx.moveTo(p.x, p.y); else ctx.lineTo(p.x, p.y); });
+        ctx.stroke();
+      });
+      ctx.restore();
+    }
+  }
+}, "MeshPartEngine");
+
+/*
+  meshpart-bar.js
+  TUGAS     : mengaktifkan/mematikan tool Mesh-, bar tombol (Tarik / Garis pembatas / Hapus pembatas / Selesai) dan dua slider (Sebaran, Gabung)
+  BAGIAN DARI: MeshPartEngine
+  DIPANGGIL OLEH: canvas-events.js (tool:changed)
+  MEMANGGIL : meshpart-detect.js (analyzeAll), Toolbar, EventBus
+  EVENT     : masuk project:changed, history:*, timeline:frameChanged (hanya menandai perlu analisis ulang); kirim tool:changed saat Selesai
+  KALAU RUSAK: bar Mesh- tidak muncul / slider tidak berefek / tombol Selesai tidak kembali ke Brush
+*/
+Modul.extend(MeshPartEngine, "meshpart-bar.js", {
+  _ICONS: {
+    move: '<path d="M12 3v18M3 12h18M12 3l-3 3M12 3l3 3M12 21l-3-3M12 21l3-3M3 12l3-3M3 12l3 3M21 12l-3-3M21 12l-3 3"/>',
+    divide: '<path d="M4 20l4-1 10.5-10.5-3-3L5 16z"/><path d="M13.5 7.5l3 3"/>',
+    trash: '<path d="M5 7h14M10 7V5h4v2M7 7l1 12h8l1-12M10 11v5M14 11v5"/>',
+    commit: '<path d="M5 12.5l4.5 4.5L19 7"/>'
+  },
+
+  _ic(name) {
+    return '<svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" ' +
+      'stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">' + (this._ICONS[name] || "") + '</svg>';
+  },
+
+  activate(container) {
+    this.active = true;
+    this.mode = "pull";
+    this.selected = null;
+    this.selPoint = null;
+    this.selPts = [];
+    this.selAll = [];
+    this.down = null;
+    this.pull = null;
+    this.dividers = [];
+    this.liveDivider = null;
+    this._pendingAnalyze = null;
+    this._analyzing = false;
+    this._selfSave = null;
+    this._bindEvents();
+    this.showBar(container);
+    // Analisis awal (kerja berat) JANGAN di detik tap ikon: tunggu layar sempat menampilkan bar dulu.
+    this._initPending = true;
+    this._initTimer = requestAnimationFrame(() => { this._initTimer = setTimeout(() => this._runInit(), 0); });
+    this._startPoll();
+    CanvasEngine.compositeAll();
+  },
+
+  deactivate() {
+    this.hideBar();
+    if (!this.active) return;
+    this.active = false;
+    this._stopPoll();
+    this._initPending = false;
+    if (this._initTimer) { clearTimeout(this._initTimer); cancelAnimationFrame(this._initTimer); this._initTimer = null; }
+    if (this._neonTimer) { clearTimeout(this._neonTimer); this._neonTimer = null; }
+    if (this._refineTimer) { clearTimeout(this._refineTimer); this._refineTimer = null; }
+    // sentuhan yang belum selesai: lepas kanvas kerjanya
+    const d = this.down;
+    if (d) { if (d.prepTimer) clearTimeout(d.prepTimer); if (d.type === "pull") this._freePull(d); }
+    this._releaseRecs();
+    this._dropPullNeon();
+       // simpanan pixel tertutup SENGAJA dipertahankan (diisi juga saat menggambar di tool lain; dicek lewat sidik gambar)
+    if (this._prewarmTimer) { clearTimeout(this._prewarmTimer); this._prewarmTimer = null; }
+    this.recs = {};
+    this.order = [];
+    this.selected = null;
+    this.selPoint = null;
+    this.selPts = [];
+    this.selAll = [];
+    this.down = null;
+    this.pull = null;
+    this.dividers = [];
+    this.liveDivider = null;
+    this._pendingAnalyze = null;
+    this._analyzing = false;
+    this._selfSave = null;
+  },
+
+  // Tandai "perlu analisis ulang" kalau gambar berubah dari luar (Undo, ganti frame, goresan lain).
+  _bindEvents() {
+    if (this._bound || typeof EventBus === "undefined") return;
+    this._bound = true;
+    // Hanya perubahan yang benar-benar mengubah gambar yang menandai "perlu analisis ulang"
+    // (ganti layer aktif dsb. tidak, supaya tidak analisis berulang-ulang).
+    const mark = (info) => {
+      if (!this.active || Date.now() < this._ignoreUntil) return;
+      const t = info && info.type;
+      // Penyimpanan gambar hasil tarikan sendiri (async, bisa selesai belakangan) mengirim event layer/cel:
+      // gambarnya sudah kita kenal, jangan analisis ulang lagi (inilah yang bikin lemot kedua kalinya).
+      if (this._selfSave && (t === "layer" || t === "cel") && (info.layerId === this._selfSave.id || (this._selfSave.ids && this._selfSave.ids.indexOf(info.layerId) >= 0))) return;
+      // Simpan riwayat ke disk (async, bisa lebih dari 1,5 detik setelah tarikan) memancarkan event "cel": bukan perubahan gambar.
+      if (t === "cel" && typeof HistoryEngine !== "undefined" && HistoryEngine._persistRunning) return;
+      if (t === "activeLayer" || t === "meshTransforms" || t === "sequences" || t === "moveGroups" || t === "projectPalettes" || t === "ruler") return;
+      this.dirty = true;
+    };
+    ["project:changed", "history:changed", "history:restored", "timeline:frameChanged"].forEach(name => EventBus.on(name, mark));
+  },
+
+  // Cek ringan tiap 0,5 detik: centang layer berubah / Undo -> analisis ulang & gambar ulang.
+  _startPoll() {
+    this._stopPoll();
+    this._poll = setInterval(() => {
+      if (!this.active || this._initPending) return;
+      this._dropStaleTouch(true);     // sentuhan nyangkut (mis. habis cubit zoom): lepaskan
+      if (this.pull || this.down) return;
+      if (this._pendingAnalyze != null) { this._flushAnalyze(); return; }
+      if (this.dirty || this._sig !== this._signature() || this._layersChanged()) {
+        this.analyzeAll();
+        CanvasEngine.compositeAll();
+      }
+    }, 500);
+  },
+
+  _stopPoll() {
+    if (this._poll) { clearInterval(this._poll); this._poll = null; }
+  },
+
+  showBar(container) {
+    this.hideBar();
+    if (!container) return;
+    const bar = document.createElement("div");
+    bar.id = "meshpart-bar";
+    bar.className = "mesh-mode-bar meshpart-bar";
+    bar.innerHTML = `
+      <div class="meshpart-row">
+        <button class="mesh-mode-btn" data-mode="pull" title="Pilih dan tarik" aria-label="Pilih dan tarik">${this._ic("move")}</button>
+        <button class="mesh-mode-btn" data-mode="divide" title="Garis pembatas" aria-label="Garis pembatas">${this._ic("divide")}</button>
+        <button class="mesh-mode-btn" data-action="clear" title="Hapus garis pembatas" aria-label="Hapus garis pembatas">${this._ic("trash")}</button>
+        <span class="meshpart-hint" id="meshpart-hint"></span>
+        <button class="mesh-mode-btn mesh-mode-done" data-action="finish" title="Selesai" aria-label="Selesai">${this._ic("commit")}</button>
+      </div>
+      <div class="meshpart-row meshpart-sliders">
+        <label class="meshpart-slider">Gabung
+          <input type="range" id="meshpart-gap" min="0" max="12" step="1" value="${this.gap}">
+        </label>
+        <label class="meshpart-slider">Warna
+          <input type="range" id="meshpart-tol" min="0" max="120" step="5" value="${this.colorTol}">
+        </label>
+      </div>`;
+    container.appendChild(bar);
+
+    bar.querySelectorAll(".mesh-mode-btn[data-mode]").forEach(btn => {
+      btn.addEventListener("click", () => this.setMode(btn.dataset.mode));
+    });
+    bar.querySelector('[data-action="clear"]').addEventListener("click", () => this.clearDividers());
+    bar.querySelector('[data-action="finish"]').addEventListener("click", () => this.finishActive());
+    let gapTimer = null;
+    bar.querySelector("#meshpart-gap").addEventListener("input", (ev) => {
+      this.gap = parseInt(ev.target.value, 10) || 0;
+      clearTimeout(gapTimer);
+      gapTimer = setTimeout(() => {
+        if (!this.active || this.pull || this.down) return;
+        this.analyzeAll();
+        CanvasEngine.compositeAll();
+      }, 200);
+    });
+    let tolTimer = null;
+    bar.querySelector("#meshpart-tol").addEventListener("input", (ev) => {
+      this.colorTol = parseInt(ev.target.value, 10) || 0;
+      clearTimeout(tolTimer);
+      tolTimer = setTimeout(() => {
+        if (!this.active || this.pull || this.down) return;
+        this.analyzeAll();
+        CanvasEngine.compositeAll();
+      }, 200);
+    });
+    this.renderBar();
+    this._updateHint();
+  },
+
+  hideBar() {
+    const bar = document.getElementById("meshpart-bar");
+    if (bar) bar.remove();
+  },
+
+  setMode(mode) {
+    this.mode = mode;
+    this.renderBar();
+    this._updateHint();
+  },
+
+  renderBar() {
+    const bar = document.getElementById("meshpart-bar");
+    if (!bar) return;
+    bar.querySelectorAll(".mesh-mode-btn[data-mode]").forEach(btn => {
+      btn.classList.toggle("mesh-mode-btn-active", btn.dataset.mode === this.mode);
+    });
+  },
+
+  clearDividers() {
+    if (!this.dividers.length) return;
+    this.dividers = [];
+    this.liveDivider = null;
+    this.analyzeAll();
+    CanvasEngine.compositeAll();
+  },
+
+  _updateHint() {
+    const el = document.getElementById("meshpart-hint");
+    if (!el) return;
+    const parts = this.order.reduce((s, id) => s + (this.recs[id] ? this.recs[id].n : 0), 0);
+    let txt;
+    if (this.mode === "divide") txt = "Gambar garis pemisah";
+    else if (this.selected) {
+      const n = (this.selPts || []).length;
+      txt = n > 1 ? n + " bagian dipilih · tarik garis neon" : "Tarik garis neon · tap bagian lain untuk menambah";
+    }
+    else txt = parts ? "Tap satu bagian (" + parts + ")" : "Tidak ada bagian";
+    if (this.skipped) txt += " · " + this.skipped + " layer dilewati";
+    el.textContent = txt;
+  },
+
+  // Tombol centang: kembali ke Brush (hasil tarikan sudah tersimpan di layer, Undo tetap bisa).
+  finishActive() {
+    try {
+      if (typeof Toolbar !== "undefined") {
+        Toolbar.activeToolId = "brush";
+        Toolbar.render();
+        EventBus.emit("tool:changed", "brush");
+      }
+      CanvasEngine.compositeAll();
+    } catch (err) { console.error("Selesai Mesh- gagal:", err); }
+  }
+}, "MeshPartEngine");
+
+/*
+  meshpart-follow.js
+  TUGAS     : membuat simpanan tersembunyi "under" Mesh- ikut berubah bersama layernya waktu Lasso / Tongkat Ajaib memindah,
+              memutar, memperbesar, atau memotong seleksi, waktu Mesh+ dicetak ke layer, dan waktu titik Mesh ditarik
+              (gambar di bawah rambut ikut bergerak/terpotong/tertarik sama persis)
+  BAGIAN DARI: MeshPartEngine
+  DIPANGGIL OLEH: lasso-commit.js (commit), mt-bake.js (bakeLayerShape), mesh-create.js, mesh-pointer.js (_downMove), mesh-vertex.js (handlePointerUp)
+  MEMANGGIL : meshpart-warp.js (_underGet, _underHash, _mkCanvas), meshpart-capture.js (_underRecord), meshpart-detect.js (_freeCanvas), MeshEngine / MeshTransformEngine (rumus warp yang sama)
+  EVENT     : tidak ada
+  KALAU RUSAK: gambar di bawah rambut hilang / tidak ikut terpindah setelah Lasso Selesai / Undo Lasso tidak mengembalikan simpanan
+*/
+/*
+  CARA KERJA (hemat memori):
+  - Tidak ada simpanan "under" untuk layer itu -> tidak melakukan apa-apa (nol memori, nol waktu).
+  - Ada: hanya KOTAK seleksi yang diproses. Satu kanvas kecil sementara seukuran kotak seleksi, langsung dibuang.
+  - Isi simpanan di dalam seleksi diambil, area asal dilubangi (kecuali tap "Salin"), lalu isi tadi digambar ulang dengan
+    transformasi yang sama persis dengan potongan di layer (posisi, putaran, skala).
+  - Perubahan dicatat sebagai kotak kecil sebelum/sesudah, jadi Undo/Redo layer ikut mengembalikan simpanan.
+  - Gagal apa pun -> layer tetap jalan normal (hanya simpanan yang mungkin dibuang oleh pemeriksaan sidik).
+*/
+Modul.extend(MeshPartEngine, "meshpart-follow.js", {
+  // Dipanggil SEBELUM area asal dilubangi. Mengembalikan catatan (atau null kalau tidak ada yang perlu diikuti).
+  _followBegin(layer, cv, L) {
+    if (!layer || !cv || !L || !L.hasSourceArea || !L.hasSourceArea() || !L.bbox || !L.center) return null;
+    if (!this.under || !this.under[layer.id]) return null;
+    const e = this._underGet(layer, cv);   // sekaligus memastikan simpanan masih cocok dengan layer (kalau tidak: dibuang)
+    if (!e) return null;
+    return { e, layerId: layer.id, hashBefore: this._underHash(cv) };
+  },
+
+  // Dipanggil SETELAH potongan ditempel ke layer (cv sudah berisi hasil akhir).
+  _followEnd(f, L, cv) {
+    if (!f || !f.e || !cv) return;
+    const e = f.e;
+    if (this.under[f.layerId] !== e || !e.canvas || e.canvas.width !== cv.width || e.canvas.height !== cv.height) return;
+    const w = cv.width, h = cv.height;
+    const B = L.bbox;
+    const sx = Math.max(0, Math.floor(B.x)), sy = Math.max(0, Math.floor(B.y));
+    const sw = Math.min(w, Math.ceil(B.x + B.w)) - sx, sh = Math.min(h, Math.ceil(B.y + B.h)) - sy;
+    const hashAfter = this._underHash(cv);
+    if (sw < 1 || sh < 1) { this._underRecord(e, f.hashBefore, hashAfter, null); return; }
+
+    // kotak tujuan = 4 sudut kotak seleksi setelah transformasi
+    const cx = L.center.x + L.offsetX, cy = L.center.y + L.offsetY;
+    const cos = Math.cos(L.angle), sin = Math.sin(L.angle);
+    let mnx = Infinity, mny = Infinity, mxx = -Infinity, mxy = -Infinity;
+    [[sx, sy], [sx + sw, sy], [sx, sy + sh], [sx + sw, sy + sh]].forEach(p => {
+      const px = (p[0] - L.center.x) * L.scaleX, py = (p[1] - L.center.y) * L.scaleY;
+      const x = cx + px * cos - py * sin, y = cy + px * sin + py * cos;
+      if (x < mnx) mnx = x; if (x > mxx) mxx = x; if (y < mny) mny = y; if (y > mxy) mxy = y;
+    });
+    // wilayah yang berubah di simpanan = kotak asal + kotak tujuan
+    let x0 = Math.max(0, Math.floor(Math.min(sx, mnx)) - 2), y0 = Math.max(0, Math.floor(Math.min(sy, mny)) - 2);
+    let x1 = Math.min(w, Math.ceil(Math.max(sx + sw, mxx)) + 2), y1 = Math.min(h, Math.ceil(Math.max(sy + sh, mxy)) + 2);
+    const rw = x1 - x0, rh = y1 - y0;
+    if (rw < 1 || rh < 1) { this._underRecord(e, f.hashBefore, hashAfter, null); return; }
+
+    const ux = e.canvas.getContext("2d", { willReadFrequently: true });
+
+    // 1. isi simpanan yang ada di dalam seleksi, dipotong sesuai bentuk seleksi (kanvas kecil seukuran kotak seleksi)
+    const sel = this._mkCanvas(sw, sh);
+    const sc = sel.getContext("2d");
+    sc.save();
+    sc.translate(-sx, -sy);
+    if (L.sourcePath) {
+      L.buildPath(sc, L.sourcePath);
+      sc.clip();
+      sc.drawImage(e.canvas, 0, 0);
+    } else if (L.sourceMask) {
+      sc.drawImage(e.canvas, 0, 0);
+      sc.globalCompositeOperation = "destination-in";
+      sc.drawImage(L.sourceMask, 0, 0);
+    }
+    sc.restore();
+
+    // simpanan kosong di seleksi dan tidak ada yang perlu dilubangi: cukup catat sidik baru
+    let has = false;
+    const t = this._mkCanvas(32, 32);
+    const tx = t.getContext("2d", { willReadFrequently: true });
+    tx.drawImage(sel, 0, 0, 32, 32);
+    const a = tx.getImageData(0, 0, 32, 32).data;
+    for (let i = 3; i < a.length; i += 4) if (a[i] > 0) { has = true; break; }
+    this._freeCanvas(t);
+    if (!has) { this._freeCanvas(sel); this._underRecord(e, f.hashBefore, hashAfter, null); return; }
+
+    const prevImg = ux.getImageData(x0, y0, rw, rh);
+    // 2. area asal dilubangi (kecuali "Salin": aslinya tetap di tempat)
+    if (!L.copied) L.punchSourceHole(ux, w, h);
+    // 3. isi tadi digambar di tujuan dengan transformasi yang sama persis dengan potongan di layer
+    ux.save();
+    ux.translate(cx, cy);
+    ux.rotate(L.angle);
+    ux.scale(L.scaleX, L.scaleY);
+    ux.translate(-L.center.x, -L.center.y);
+    ux.drawImage(sel, sx, sy);
+    ux.restore();
+    this._freeCanvas(sel);
+
+    this._underRecord(e, f.hashBefore, hashAfter, { x: x0, y: y0, prev: prevImg, next: ux.getImageData(x0, y0, rw, rh) });
+  },
+  // ---------------------------------------------------------------------------------------------------
+  // Mesh+ : saat bentuk warp dicetak (bake) ke pixel layer, simpanan dicetak dengan warp yang sama persis.
+  // ---------------------------------------------------------------------------------------------------
+  _followBakeBegin(layer, cv) {
+    if (!layer || !cv || !this.under || !this.under[layer.id]) return null;
+    const e = this._underGet(layer, cv);
+    if (!e) return null;
+    return { e, layerId: layer.id, hashBefore: this._underHash(cv) };
+  },
+
+  _followBakeEnd(f, layer, mt, cv) {
+    if (!f || !f.e || !cv || !mt || typeof MeshEngine === "undefined") return;
+    const e = f.e;
+    if (this.under[f.layerId] !== e || !e.canvas || e.canvas.width !== cv.width || e.canvas.height !== cv.height) return;
+    if (!(mt.layerOffsets || {})[layer.id]) return;   // sama seperti drawLayerWarped: bukan anggota -> tidak digambar
+    const project = ProjectStore.getProject();
+    const w = cv.width, h = cv.height;
+    const hashAfter = this._underHash(cv);
+    const ux = e.canvas.getContext("2d", { willReadFrequently: true });
+    const prevAll = ux.getImageData(0, 0, w, h).data;
+    const bb = this._alphaBox(prevAll, w, h);
+    if (!bb) { this._underRecord(e, f.hashBefore, hashAfter, null); return; }   // simpanan kosong: cukup catat sidik baru
+
+    // sama persis dengan MeshTransformEngine._mtRender (skala 1): posisi layer ikut dicetak, grid halus, getaran preview keyframe ikut
+    const st = CanvasEngine.getAnimatedState(layer, project.currentFrame) || {};
+    const ox = Number(st.x) || 0, oy = Number(st.y) || 0;
+    const baked = this._mkCanvas(project.width, project.height);
+    baked.getContext("2d").drawImage(e.canvas, 0, 0, w, h, ox, oy, w, h);
+    const out = this._mkCanvas(project.width, project.height);
+    const res = MeshEngine.HIDDEN_GRID_RESOLUTION;
+    const original = MeshEngine.generateHiddenGrid(mt.bounds, res);
+    const saved = mt.vertices;
+    mt.vertices = mt._previewVertices || mt.vertices;
+    let current;
+    try { current = original.map(p => MeshEngine.idwDisplace(p, mt)); } finally { mt.vertices = saved; }
+    MeshTransformEngine._mtDrawTriangles(out.getContext("2d"), baked, original, current, res, (p) => p);
+    this._freeCanvas(baked);
+
+    ux.clearRect(0, 0, w, h);
+    ux.drawImage(out, 0, 0);
+    this._freeCanvas(out);
+    const nextAll = ux.getImageData(0, 0, w, h);
+    const nb = this._alphaBox(nextAll.data, w, h);
+    const x0 = Math.min(bb.x0, nb ? nb.x0 : bb.x0), y0 = Math.min(bb.y0, nb ? nb.y0 : bb.y0);
+    const x1 = Math.max(bb.x1, nb ? nb.x1 : bb.x1), y1 = Math.max(bb.y1, nb ? nb.y1 : bb.y1);
+    const rw = x1 - x0, rh = y1 - y0;
+    const prev = new ImageData(new Uint8ClampedArray(rw * rh * 4), rw, rh);
+    const next = new ImageData(new Uint8ClampedArray(rw * rh * 4), rw, rh);
+    for (let y = 0; y < rh; y++) {
+      const so = ((y0 + y) * w + x0) * 4;
+      prev.data.set(prevAll.subarray(so, so + rw * 4), y * rw * 4);
+      next.data.set(nextAll.data.subarray(so, so + rw * 4), y * rw * 4);
+    }
+    this._underRecord(e, f.hashBefore, hashAfter, { x: x0, y: y0, prev, next });
+  },
+
+  // Kotak yang berisi semua pixel tidak transparan (null = kosong).
+  _alphaBox(data, w, h) {
+    let x0 = w, y0 = h, x1 = -1, y1 = -1;
+    for (let y = 0; y < h; y++) {
+      const row = y * w * 4;
+      for (let x = 0; x < w; x++) {
+        if (data[row + x * 4 + 3] > 0) {
+          if (x < x0) x0 = x; if (x > x1) x1 = x; if (y < y0) y0 = y; if (y > y1) y1 = y;
+        }
+      }
+    }
+    return x1 < 0 ? null : { x0, y0, x1: x1 + 1, y1: y1 + 1 };
+  },
+
+  // ---------------------------------------------------------------------------------------------------
+  // Mesh (area) : potongan simpanan di area mesh dipotret saat Mesh dibuat; saat titik selesai ditarik, area itu
+  // di simpanan digambar ulang dari potret tadi dengan grid dan tarikan yang sama seperti di layer.
+  // Potret hanya di memori (bukan di data project), paling banyak MESH_SNAPS buah.
+  // ---------------------------------------------------------------------------------------------------
+  MESH_SNAPS: 8,
+
+  _meshCropRect(mesh, cw, ch) {
+    const b = mesh.bounds;
+    const pad = Math.max(b.width, b.height) * 0.6;
+    const x = Math.max(0, Math.floor(b.x - pad)), y = Math.max(0, Math.floor(b.y - pad));
+    return { x, y, w: Math.min(cw - x, Math.ceil(b.width + pad * 2)), h: Math.min(ch - y, Math.ceil(b.height + pad * 2)) };
+  },
+
+  _followMeshCreate(layer, mesh) {
+    if (!layer || !mesh || !this.under || !this.under[layer.id]) return;
+    const cv = CanvasEngine.ensureLayerCanvas(layer);
+    if (!cv) return;
+    const e = this._underGet(layer, cv);
+    if (!e || e.canvas.width !== cv.width || e.canvas.height !== cv.height) return;
+    const r = this._meshCropRect(mesh, cv.width, cv.height);
+    if (r.w < 1 || r.h < 1) return;
+    const c = this._mkCanvas(r.w, r.h);
+    c.getContext("2d").drawImage(e.canvas, r.x, r.y, r.w, r.h, 0, 0, r.w, r.h);
+    // potongan kosong: tidak perlu menyimpan kanvas (null = "kosong")
+    const t = this._mkCanvas(32, 32);
+    const tx = t.getContext("2d", { willReadFrequently: true });
+    tx.drawImage(c, 0, 0, 32, 32);
+    const a = tx.getImageData(0, 0, 32, 32).data;
+    let has = false;
+    for (let i = 3; i < a.length; i += 4) if (a[i] > 0) { has = true; break; }
+    this._freeCanvas(t);
+    if (!has) { this._freeCanvas(c); }
+    const store = this._umesh || (this._umesh = {});
+    if (store[mesh.id]) this._freeCanvas(store[mesh.id].canvas);
+    delete store[mesh.id];
+    store[mesh.id] = { x: r.x, y: r.y, canvas: has ? c : null, layerId: layer.id };
+    const ids = Object.keys(store);
+    while (ids.length > this.MESH_SNAPS) { const k = ids.shift(); this._freeCanvas(store[k].canvas); delete store[k]; }
+  },
+
+  // Dipanggil saat jari menyentuh titik yang akan ditarik: pastikan simpanan masih cocok dengan layer.
+  _followMeshBegin(layer) {
+    if (!layer || !this.under || !this.under[layer.id]) return null;
+    const cv = CanvasEngine.ensureLayerCanvas(layer);
+    if (!cv) return null;
+    const e = this._underGet(layer, cv);
+    if (!e) return null;
+    return { e, layerId: layer.id, hashBefore: this._underHash(cv) };
+  },
+
+  // Dipanggil saat jari diangkat. Ditunda satu frame supaya frame warp terakhir di layer sudah tergambar.
+  _followMeshEnd(f, layer, mesh) {
+    if (!f || !layer || !mesh) return;
+    requestAnimationFrame(() => {
+      try { this._followMeshApply(f, layer, mesh); } catch (err) { console.error("Mesh- ikut Mesh gagal:", err); }
+    });
+  },
+
+  _followMeshApply(f, layer, mesh) {
+    const e = f.e;
+    if (this.under[f.layerId] !== e || !e.canvas) return;
+    const cv = CanvasEngine.ensureLayerCanvas(layer);
+    const snap = this._umesh && this._umesh[mesh.id];
+    if (!cv || !snap || snap.layerId !== f.layerId || typeof MeshEngine === "undefined") return;   // tidak bisa ikut: simpanan dibuang saat dipakai (perilaku lama)
+    const w = cv.width, h = cv.height;
+    if (e.canvas.width !== w || e.canvas.height !== h) return;
+    const hashAfter = this._underHash(cv);
+
+    // wilayah yang digambar ulang = sama dengan yang dibersihkan MeshEngine._meshDrawGrid (batas mesh + bantalan)
+    const b = mesh.bounds;
+    const pad = Math.max(b.width, b.height) * 0.6;
+    const rx0 = Math.max(0, Math.floor(b.x - pad)), ry0 = Math.max(0, Math.floor(b.y - pad));
+    const rx1 = Math.min(w, Math.ceil(b.x + b.width + pad)), ry1 = Math.min(h, Math.ceil(b.y + b.height + pad));
+    const rw = rx1 - rx0, rh = ry1 - ry0;
+    if (rw < 1 || rh < 1) { this._underRecord(e, f.hashBefore, hashAfter, null); return; }
+    const ux = e.canvas.getContext("2d", { willReadFrequently: true });
+    const prev = ux.getImageData(rx0, ry0, rw, rh);
+    ux.save();
+    ux.beginPath();
+    ux.rect(rx0, ry0, rw, rh);
+    ux.clip();
+    ux.clearRect(rx0, ry0, rw, rh);
+    if (snap.canvas) {
+      const res = MeshEngine.HIDDEN_GRID_RESOLUTION;
+      const original = MeshEngine.generateHiddenGrid(mesh.bounds, res);
+      const current = original.map(p => MeshEngine.idwDisplace(p, mesh));
+      const toSource = (p) => ({ x: p.x - snap.x, y: p.y - snap.y });
+      for (let row = 0; row < res - 1; row++) {
+        for (let col = 0; col < res - 1; col++) {
+          const i = row * res + col;
+          MeshEngine.drawWarpedTriangle(ux, snap.canvas, toSource(original[i]), toSource(original[i + 1]), toSource(original[i + res]),
+            current[i], current[i + 1], current[i + res]);
+          MeshEngine.drawWarpedTriangle(ux, snap.canvas, toSource(original[i + 1]), toSource(original[i + res + 1]), toSource(original[i + res]),
+            current[i + 1], current[i + res + 1], current[i + res]);
+        }
+      }
+    }
+    ux.restore();
+    this._underRecord(e, f.hashBefore, hashAfter, { x: rx0, y: ry0, prev, next: ux.getImageData(rx0, ry0, rw, rh) });
+  }
+}, "MeshPartEngine");
+
+/*
+  meshpart-group.js
+  TUGAS     : pilihan Mesh- lebih dari satu bagian (mis. wajah + rambut) yang ditarik barengan. Bagian-bagian terpilih
+              digabung jadi satu "bagian gabungan" sementara (rec.group), jadi mesin tarik yang sudah ada tidak perlu diubah.
+  BAGIAN DARI: MeshPartEngine
+  DIPANGGIL OLEH: meshpart-pointer.js (_select), meshpart-detect.js (_reselect, _findPart, _freeRec), meshpart-warp.js (tarik), meshpart-overlay.js
+  MEMANGGIL : meshpart-detect.js (_makeNeon, _labelNear), meshpart-warp.js (_dropPrep)
+  EVENT     : tidak ada
+  KALAU RUSAK: tap bagian kedua tidak menambah pilihan / neon gabungan tidak muncul / tarikan hanya menggerakkan satu bagian
+*/
+Modul.extend(MeshPartEngine, "meshpart-group.js", {
+  GID: 1000,   // nomor bagian gabungan (di atas MAX_PARTS, tidak bentrok dengan bagian biasa)
+
+  // Bagian menurut nomor: bagian biasa, atau bagian gabungan kalau nomornya GID.
+  _partById(rec, id) {
+    if (!rec) return null;
+    return rec.parts[id] || (rec.group && rec.group.id === id ? rec.group : null);
+  },
+
+  // Tabel "label ini milik bagian itu?" (1 = ya). Bagian gabungan = semua anggotanya.
+  _memberLut(rec, part) {
+    const lut = new Uint8Array(Math.max(rec.n, 1) + 2);
+    if (part.members) part.members.forEach(m => { lut[m] = 1; });
+    else if (part.id < lut.length) lut[part.id] = 1;
+    return lut;
+  },
+
+  // Titik di dalam bagian (koordinat layer), dekat tengahnya.
+  _innerPoint(rec, id) {
+    const p = rec.parts[id];
+    if (!p) return null;
+    const cb = p.cbox, lw = rec.lw, lab = rec.lab, s = rec.s;
+    const cx = cb.x + cb.w / 2, cy = cb.y + cb.h / 2;
+    let best = null, bd = Infinity;
+    for (let y = cb.y; y < cb.y + cb.h; y++) {
+      for (let x = cb.x; x < cb.x + cb.w; x++) {
+        if (lab[y * lw + x] !== id) continue;
+        const d = (x - cx) * (x - cx) + (y - cy) * (y - cy);
+        if (d < bd) { bd = d; best = { x: (x + 0.5) / s, y: (y + 0.5) / s }; }
+      }
+    }
+    return best;
+  },
+
+  _dropGroup(rec) {
+    const g = rec && rec.group;
+    if (!g) return;
+    if (g.neon && g.neon.canvas) this._freeCanvas(g.neon.canvas);
+    this._dropPrep(g);
+    rec.group = null;
+  },
+
+  _dropGroups() {
+    Object.keys(this.recs || {}).forEach(lid => this._dropGroup(this.recs[lid]));
+  },
+
+  // Gabungkan bagian ids (nomor bagian biasa, satu layer) jadi rec.group.
+  _buildGroup(rec, ids) {
+    this._dropGroup(rec);
+    const lw = rec.lw, lh = rec.lh, lab = rec.lab, s = rec.s;
+    const lut = new Uint8Array(Math.max(rec.n, 1) + 2);
+    let x0 = Infinity, y0 = Infinity, x1 = -Infinity, y1 = -Infinity, cx0 = Infinity, cy0 = Infinity, cx1 = -Infinity, cy1 = -Infinity, area = 0;
+    ids.forEach(id => {
+      const p = rec.parts[id];
+      lut[id] = 1; area += p.area;
+      x0 = Math.min(x0, p.bbox.x); y0 = Math.min(y0, p.bbox.y);
+      x1 = Math.max(x1, p.bbox.x + p.bbox.w); y1 = Math.max(y1, p.bbox.y + p.bbox.h);
+      cx0 = Math.min(cx0, p.cbox.x); cy0 = Math.min(cy0, p.cbox.y);
+      cx1 = Math.max(cx1, p.cbox.x + p.cbox.w); cy1 = Math.max(cy1, p.cbox.y + p.cbox.h);
+    });
+    const list = [];
+    for (let y = cy0; y < cy1; y++) {
+      for (let x = cx0; x < cx1; x++) {
+        const i = y * lw + x;
+        if (!lut[lab[i]]) continue;
+        if (x === 0 || y === 0 || x === lw - 1 || y === lh - 1 || !lut[lab[i - 1]] || !lut[lab[i + 1]] || !lut[lab[i - lw]] || !lut[lab[i + lw]]) list.push(i);
+      }
+    }
+    const stride = Math.max(1, Math.ceil(list.length / 2000));
+    const pts = new Float32Array(Math.ceil(list.length / stride) * 2);
+    let q = 0;
+    for (let k = 0; k < list.length; k += stride) {
+      pts[q++] = ((list[k] % lw) + 0.5) / s;
+      pts[q++] = (((list[k] / lw) | 0) + 0.5) / s;
+    }
+    const cbox = { x: cx0, y: cy0, w: cx1 - cx0, h: cy1 - cy0 };
+    const bbox = { x: x0, y: y0, w: x1 - x0, h: y1 - y0 };
+    const g = { id: this.GID, layerId: rec.layerId, members: ids.slice(), lut, bbox, cbox, area, pts, neon: null, refined: false, _glow2: true };
+    try { g.neon = this._makeNeon(list, cbox, lw, s, true); } catch (err) { console.error("Mesh- neon gabungan gagal:", err); g.neon = { canvas: null }; }
+    rec.group = g;
+    return g;
+  },
+
+  // Pasang pilihan baru dari daftar titik [{layerId,id,x,y}] (boleh beda layer).
+  // Per layer: 1 bagian = bagian biasa, 2+ bagian = bagian gabungan layer itu. Hasilnya ada di selAll.
+  _setSelection(pts) {
+    this._dropGroups();
+    this.selPts = pts.map(p => ({ layerId: p.layerId, id: p.id, x: p.x, y: p.y }));
+    this.selAll = [];
+    if (!pts.length) { this.selected = null; this.selPoint = null; return; }
+    this.selPoint = { layerId: pts[0].layerId, x: pts[0].x, y: pts[0].y };
+    const byLayer = {}, order = [];
+    pts.forEach(p => {
+      if (!byLayer[p.layerId]) { byLayer[p.layerId] = []; order.push(p.layerId); }
+      byLayer[p.layerId].push(p.id);
+    });
+    order.forEach(lid => {
+      const rec = this.recs[lid];
+      if (!rec) return;
+      const ids = byLayer[lid];
+      if (ids.length === 1) this.selAll.push({ layerId: lid, id: ids[0] });
+      else { this._buildGroup(rec, ids); this.selAll.push({ layerId: lid, id: this.GID }); }
+    });
+    this.selected = this.selAll[0] || null;
+  },
+
+  _selEntries() {
+    return this.selAll || [];
+  },
+
+  // Data untuk mempertahankan pilihan setelah tarikan (bagian bergeser, nomor bisa berganti): kotak + warna tiap anggota.
+  _groupKeep(rec, part) {
+    const ids = part.members || [part.id];
+    return ids.map(id => {
+      const p = rec.parts[id];
+      const pt = this._innerPoint(rec, id);
+      return p && pt ? { id, pts: [pt], bbox: { x: p.bbox.x, y: p.bbox.y, w: p.bbox.w, h: p.bbox.h }, c: [rec.mr[id], rec.mg[id], rec.mb[id]] } : null;
+    }).filter(Boolean);
+  },
+
+  // { idLayer: [data anggota...] } untuk semua layer yang punya bagian terpilih.
+  _selKeepAll() {
+    const out = {};
+    this._selEntries().forEach(e => {
+      const rec = this.recs[e.layerId];
+      const part = this._partById(rec, e.id);
+      if (rec && part) out[e.layerId] = this._groupKeep(rec, part);
+    });
+    return out;
+  },
+
+  // Analisis ulang saat pilihan lebih dari satu: tiap anggota dicari lagi lewat titiknya; kalau meleset (habis ditarik)
+  // lewat tumpang-tindih kotak + warna rata-rata yang paling mirip.
+  _reselectMulti() {
+    this._dropGroups();
+    this.selected = null;
+    this.selAll = [];
+    const old = this.selPts;
+    const keepAll = this._pullKeepAll || null;
+    const R = CanvasEngine.getTouchRadius() * 1.5;
+    const out = [];
+    const layers = [];
+    old.forEach(o => { if (layers.indexOf(o.layerId) < 0) layers.push(o.layerId); });
+    layers.forEach(layerId => {
+      const rec = this.recs[layerId];
+      if (!rec) return;
+      const used = {};
+      const add = (id, pt) => { if (!id || used[id]) return; used[id] = 1; out.push({ layerId, id, x: pt.x, y: pt.y }); };
+      const keep = keepAll && keepAll[layerId];
+      if (keep && keep.length) {
+        keep.forEach(m => {
+          let id = 0, best = Infinity;
+          Object.keys(rec.parts).forEach(k => {
+            const p = rec.parts[k];
+            if (used[p.id]) return;
+            const o = m.bbox, b = p.bbox;
+            const ix = Math.min(o.x + o.w, b.x + b.w) - Math.max(o.x, b.x);
+            const iy = Math.min(o.y + o.h, b.y + b.h) - Math.max(o.y, b.y);
+            if (!(ix > 0 && iy > 0)) return;
+            const d0 = rec.mr[p.id] - m.c[0], d1 = rec.mg[p.id] - m.c[1], d2 = rec.mb[p.id] - m.c[2];
+            const dd = d0 * d0 + d1 * d1 + d2 * d2;
+            if (dd < best) { best = dd; id = p.id; }
+          });
+          if (id) { const ip = this._innerPoint(rec, id); if (ip) add(id, ip); }
+        });
+      } else {
+        old.filter(o => o.layerId === layerId).forEach(o => { add(this._labelNear(rec, o.x, o.y, R), o); });
+      }
+    });
+    this._setSelection(out);
+    this._refineSoon();
+  }
+}, "MeshPartEngine");
+
+/*
+  meshpart-prep.js
+  TUGAS     : persiapan tarikan Mesh-: potong bagian dari layer, sisa layer, bentuk tetangga, titik pegang, dan persiapan di muka (prewarm)
+  BAGIAN DARI: MeshPartEngine
+  DIPANGGIL OLEH: meshpart-pointer.js (_pullEnsureReady), meshpart-warp.js, meshpart-follow.js
+  MEMANGGIL : meshpart-fill.js, meshpart-detect.js (_pixelLabel)
+  EVENT     : tidak ada
+  KALAU RUSAK: tarikan tidak mau mulai / lambat di sentuhan pertama / bagian tidak terpotong benar
+*/
+Modul.extend(MeshPartEngine, "meshpart-prep.js", {
+  // Siapkan: sisa layer tanpa bagian itu, potongan bagian, dan warna isian.
+  // Hanya wilayah di sekitar bagian yang dibaca/ditulis (bukan seluruh layer) supaya cepat.
+  _pullPrepare(d) {
+    const g = this._prepGen(d);
+    let r;
+    do { r = g.next(); } while (!r.done);
+    return r.value;
+  },
+
+  // Sama dengan persiapan biasa tapi berhenti sejenak (yield) di antara tahap-tahap berat,
+  // supaya bisa dikerjakan sedikit-sedikit di waktu nganggur tanpa membekukan layar.
+  *_prepGen(d) {
+    const layer = ProjectStore.getLayerById(d.layerId);
+    const rec = this.recs[d.layerId];
+    const part = this._partById(rec, d.partId);
+    if (!layer || !rec || !part || layer.locked) return false;
+    const cv = CanvasEngine.ensureLayerCanvas(layer);
+    if (!cv || cv.width !== rec.w || cv.height !== rec.h) return false;
+
+    const w = rec.w, h = rec.h, b = part.bbox, lut = this._memberLut(rec, part);
+    const s = rec.s, lw = rec.lw, lh = rec.lh, lab = rec.lab;
+    const m = this._fillReach(b);
+    const rx0 = Math.max(0, b.x - m), ry0 = Math.max(0, b.y - m);
+    const rx1 = Math.min(w, b.x + b.w + m), ry1 = Math.min(h, b.y + b.h + m);
+    const rw = rx1 - rx0, rh = ry1 - ry0;
+
+    const ctx = cv.getContext("2d");
+    const reg = ctx.getImageData(rx0, ry0, rw, rh);
+    const data = reg.data;
+
+    // pixel milik bagian = ada gambar DAN selnya berlabel bagian ini
+    if (!rec.edge2 && rec.edge) {   // pita 2 sel di sekitar batas antar bagian: pixel di sana dipilah menurut warna, bukan kotak sel
+      const e2 = new Uint8Array(lw * lh);
+      for (let y = 0; y < lh; y++) for (let x = 0; x < lw; x++) {
+        if (!rec.edge[y * lw + x]) continue;
+        for (let dy = -1; dy <= 1; dy++) { const yy = y + dy; if (yy < 0 || yy >= lh) continue; for (let dx = -1; dx <= 1; dx++) { const xx = x + dx; if (xx >= 0 && xx < lw) e2[yy * lw + xx] = 1; } }
+      }
+      rec.edge2 = e2;
+    }
+    const isPart = new Uint8Array(rw * rh);
+    const cellX = new Int32Array(rw);
+    for (let x = 0; x < rw; x++) cellX[x] = Math.min(lw - 1, ((rx0 + x) * s) | 0);
+    for (let y = 0; y < rh; y++) {
+      const row = Math.min(lh - 1, ((ry0 + y) * s) | 0) * lw;
+      for (let x = 0; x < rw; x++) {
+        const i = y * rw + x;
+        if (data[i * 4 + 3] <= 0) continue;
+        const c = row + cellX[x];
+        let L = lab[c];
+        if (L && rec.edge2 && rec.edge2[c]) L = this._pixelLabel(rec, c, data[i * 4], data[i * 4 + 1], data[i * 4 + 2], L);
+        if (L && lut[L]) isPart[i] = 1;
+      }
+    }
+
+    yield;
+    // potongan bagian (seukuran bbox) + peta bentuk, lalu kosongkan pixel bagian di data
+    const pc = document.createElement("canvas");
+    pc.width = b.w; pc.height = b.h;
+    const pctx = pc.getContext("2d");
+    const pimg = pctx.createImageData(b.w, b.h);
+    const pd = pimg.data;
+    const M = new Uint8Array(b.w * b.h);
+    for (let y = 0; y < b.h; y++) {
+      for (let x = 0; x < b.w; x++) {
+        const i = (b.y - ry0 + y) * rw + (b.x - rx0 + x);
+        if (!isPart[i]) continue;
+        const o = i * 4, q = (y * b.w + x) * 4;
+        pd[q] = data[o]; pd[q + 1] = data[o + 1]; pd[q + 2] = data[o + 2]; pd[q + 3] = data[o + 3];
+        M[y * b.w + x] = 1;
+        data[o + 3] = 0;
+      }
+    }
+    pctx.putImageData(pimg, 0, 0);
+
+    yield;
+    // sisa layer: salin utuh (cepat), lalu kosongkan hanya kotak bagian
+    const base = document.createElement("canvas");
+    base.width = w; base.height = h;
+    const bctx = base.getContext("2d");
+    bctx.drawImage(cv, 0, 0);
+    bctx.putImageData(reg, rx0, ry0, b.x - rx0, b.y - ry0, b.w, b.h);
+
+    d.base = base;
+    d.partC = pc;
+    yield;
+    d.fillC = null;
+    d.hulls = this._neighborHulls(rec, part);   // bentuk utuh bagian tetangga (misal wajah bulat) untuk menutup tempat yang ditinggalkan
+    yield;
+    d.bbox = b;
+    d.rect = null;     // wilayah yang sudah tergambar ulang (bertambah, tidak menyusut)
+
+    // peta jarak bertanda ke tepi bentuk (negatif di dalam), dengan bingkai kosong di sekeliling
+    this._pullCenter(d);
+    return true;
+  },
+
+  // Kunci data siap-pakai yang boleh disimpan di muka (tidak bergantung pada titik sentuh).
+  _prepKeys() { return ["base", "partC", "fillC", "bbox", "hulls"]; },
+
+  // Bagian tetangga yang menempel pada bagian ini (misal wajah di bawah rambut) beserta bentuk utuhnya (cangkang cembung dari tepinya)
+  // dan warna ratanya. Dipakai menutup tempat yang ditinggalkan bagian ini DI DALAM bentuk tetangga itu, jadi wajah bulat tetap bulat
+  // walau sebagian pixelnya dulu tertimpa rambut. Di luar bentuk tetangga, tempat yang ditinggalkan dibiarkan kosong.
+  _neighborHulls(rec, part) {
+    const s = rec.s, lw = rec.lw, lh = rec.lh, lab = rec.lab, lut = this._memberLut(rec, part), b = part.bbox;
+    const out = [];
+    if (!rec.mr) return out;
+    const cx0 = Math.max(0, Math.floor(b.x * s) - 1), cy0 = Math.max(0, Math.floor(b.y * s) - 1);
+    const cx1 = Math.min(lw - 1, Math.ceil((b.x + b.w) * s) + 1), cy1 = Math.min(lh - 1, Math.ceil((b.y + b.h) * s) + 1);
+    const touch = {};
+    for (let y = cy0; y <= cy1; y++) {
+      for (let x = cx0; x <= cx1; x++) {
+        if (!lut[lab[y * lw + x]]) continue;
+        const n4 = [x > 0 ? lab[y * lw + x - 1] : 0, x < lw - 1 ? lab[y * lw + x + 1] : 0, y > 0 ? lab[(y - 1) * lw + x] : 0, y < lh - 1 ? lab[(y + 1) * lw + x] : 0];
+        for (let i = 0; i < 4; i++) { const L = n4[i]; if (L && !lut[L]) touch[L] = (touch[L] || 0) + 1; }
+      }
+    }
+    Object.keys(touch).forEach(key => {
+      const L = parseInt(key, 10);
+      const np = rec.parts[L];
+      if (!np || touch[key] < 6) return;
+      const nb = np.bbox;
+      const x0 = Math.max(0, Math.floor(nb.x * s) - 1), y0 = Math.max(0, Math.floor(nb.y * s) - 1);
+      const x1 = Math.min(lw - 1, Math.ceil((nb.x + nb.w) * s) + 1), y1 = Math.min(lh - 1, Math.ceil((nb.y + nb.h) * s) + 1);
+      const pts = [];
+      for (let y = y0; y <= y1; y++) {
+        for (let x = x0; x <= x1; x++) {
+          if (lab[y * lw + x] !== L) continue;
+          const edge = x === 0 || y === 0 || x === lw - 1 || y === lh - 1 ||
+            lab[y * lw + x - 1] !== L || lab[y * lw + x + 1] !== L || lab[(y - 1) * lw + x] !== L || lab[(y + 1) * lw + x] !== L;
+          if (edge) pts.push({ x: (x + 0.5) / s, y: (y + 0.5) / s });
+        }
+      }
+      if (pts.length < 3) return;
+      pts.sort((a, c) => a.x - c.x || a.y - c.y);
+      const cross = (o, a, c) => (a.x - o.x) * (c.y - o.y) - (a.y - o.y) * (c.x - o.x);
+      const lo = [];
+      for (let i = 0; i < pts.length; i++) { while (lo.length >= 2 && cross(lo[lo.length - 2], lo[lo.length - 1], pts[i]) <= 0) lo.pop(); lo.push(pts[i]); }
+      const up = [];
+      for (let i = pts.length - 1; i >= 0; i--) { while (up.length >= 2 && cross(up[up.length - 2], up[up.length - 1], pts[i]) <= 0) up.pop(); up.push(pts[i]); }
+      lo.pop(); up.pop();
+      const poly = lo.concat(up);
+      if (poly.length < 3) return;
+      out.push({ poly, color: "rgb(" + Math.round(rec.mr[L]) + "," + Math.round(rec.mg[L]) + "," + Math.round(rec.mb[L]) + ")", lw: 2.5 / s, area: nb.w * nb.h });
+    });
+    out.sort((a, c) => c.area - a.area);   // yang besar digambar dulu, yang kecil (lebih spesifik) di atasnya
+    return out;
+  },
+
+  // Titik pegang = titik tepi bagian yang paling dekat dengan sentuhan (supaya garis tepi yang ikut jari, bukan titik meleset).
+  _pullCenter(d) {
+    const part = this._partById(this.recs[d.layerId], d.partId);
+    if (!part) return false;
+    d.center = { x: d.anchor.x, y: d.anchor.y };
+    const pts = part.pts;
+    let bd = Infinity;
+    for (let k = 0; k < pts.length; k += 2) {
+      const ex = pts[k] - d.anchor.x, ey = pts[k + 1] - d.anchor.y;
+      const dd = ex * ex + ey * ey;
+      if (dd < bd) { bd = dd; d.center = { x: pts[k], y: pts[k + 1] }; }
+    }
+    // Bagian gabungan (beberapa bagian satu layer): TIAP anggota punya titik pegang sendiri (tepinya yang terdekat dengan sentuhan),
+    // jadi anggota yang tidak tersentuh pun ikut tertarik oleh jari yang sama.
+    d.centers = null;
+    const rec = this.recs[d.layerId];
+    if (part.members && part.members.length > 1 && rec) {
+      const cs = [];
+      part.members.forEach(id => {
+        const mp = rec.parts[id];
+        if (!mp) return;
+        let b2 = Infinity, best = null;
+        for (let k = 0; k < mp.pts.length; k += 2) {
+          const ex = mp.pts[k] - d.anchor.x, ey = mp.pts[k + 1] - d.anchor.y;
+          const dd = ex * ex + ey * ey;
+          if (dd < b2) { b2 = dd; best = { x: mp.pts[k], y: mp.pts[k + 1] }; }
+        }
+        if (best) cs.push(best);
+      });
+      if (cs.length > 1) d.centers = cs;
+    }
+    d.path = [{ x: d.center.x, y: d.center.y }];   // jejak jari (koordinat layer), mulai dari titik pegang
+    return true;
+  },
+
+  // Siapkan tarikan di muka begitu bagian terpilih dan neon halusnya jadi (saat HP sedang nganggur),
+  // supaya saat jari menyentuh garis, tarikan langsung ikut tanpa menunggu hitungan berat.
+  _prewarmSoon() {
+    if (this._prewarmTimer) return;
+    this._prewarmTimer = setTimeout(() => { this._prewarmTimer = null; this._prewarmStart(); }, 15);
+  },
+
+  // Persiapan di muka dikerjakan per tahap (tiap tahap jeda 8 ms) dan berhenti kalau jari menyentuh layar.
+  _prewarmStart() {
+    if (!this.active || this.pull || this.down || this._pendingAnalyze != null || this._initPending) return;
+    let sel = null, part = null;
+    // Hanya bagian utama yang disiapkan di muka: tiap persiapan menyimpan salinan layer penuh (memori besar, bikin lemot).
+    // Bagian terpilih lain disiapkan saat jari mulai menarik.
+    this._selEntries().slice(0, 1).some(e => {
+      const p = this._findPart(e);
+      if (p && p.refined && !p._prep && !p._prepJob) { sel = e; part = p; return true; }
+      return false;
+    });
+    if (!part) return;
+    const tmp = { layerId: sel.layerId, partId: sel.id, anchor: { x: 0, y: 0 } };
+    const job = { tmp, gen: this._prepGen(tmp), dead: false, timer: null };
+    part._prepJob = job;
+    const step = () => {
+      job.timer = null;
+      if (job.dead || !this.active) return;
+      if (this.pull || this.down) { job.timer = setTimeout(step, 100); return; }
+      let r;
+      try { r = job.gen.next(); } catch (err) { console.error("Mesh- siapkan di muka gagal:", err); this._dropPrep(part); return; }
+      if (r.done) { this._finishPrepJob(part, r); this._prewarmSoon(); }
+      else job.timer = setTimeout(step, 3);
+    };
+    job.timer = setTimeout(step, 0);
+  },
+
+  // Selesaikan sisa tahap persiapan sekarang juga (dipakai saat jari sudah menyentuh sebelum persiapan selesai).
+  _finishPrepJob(part, doneRes) {
+    const job = part && part._prepJob;
+    if (!job || job.dead) return;
+    let r = doneRes;
+    try { while (!r || !r.done) r = job.gen.next(); } catch (err) { console.error("Mesh- siapkan gagal:", err); this._dropPrep(part); return; }
+    if (job.timer) { clearTimeout(job.timer); job.timer = null; }
+    part._prepJob = null;
+    if (r.value) {
+      const keep = {};
+      this._prepKeys().forEach(k => { keep[k] = job.tmp[k]; });
+      part._prep = keep;
+    } else {
+      this._freeCanvas(job.tmp.base); this._freeCanvas(job.tmp.partC); this._freeCanvas(job.tmp.fillC);
+    }
+  },
+
+  _dropPrep(part) {
+    if (!part) return;
+    const j = part._prepJob;
+    if (j) {
+      j.dead = true;
+      if (j.timer) { clearTimeout(j.timer); j.timer = null; }
+      part._prepJob = null;
+      this._freeCanvas(j.tmp.base); this._freeCanvas(j.tmp.partC); this._freeCanvas(j.tmp.fillC);
+    }
+    const p = part._prep;
+    if (!p) return;
+    part._prep = null;
+    this._freeCanvas(p.base); this._freeCanvas(p.partC); this._freeCanvas(p.fillC);
+  }
+}, "MeshPartEngine");
+
+/*
+  meshpart-analyze.js
+  TUGAS     : mencari BAGIAN di satu layer (bentuk yang saling menyambung, dipisah warna/celah), melebarkan celah, garis pembatas manual
+  BAGIAN DARI: MeshPartEngine
+  DIPANGGIL OLEH: meshpart-detect.js (analyzeAll)
+  MEMANGGIL : meshpart-neon.js (_pixelLabel), CanvasEngine.ensureLayerCanvas
+  EVENT     : tidak ada
+  KALAU RUSAK: seluruh gambar jadi satu bagian / bagian terpotong salah / bagian terlalu banyak
+*/
+Modul.extend(MeshPartEngine, "meshpart-analyze.js", {
+  // Semua kerja berat dilakukan di peta KECIL (maks DETECT_MAX px); pixel penuh hanya disentuh sekali (baca alpha).
+    _analyzeLayer(layer) {
+    if (this._underLoad) this._underLoad(layer);   // simpanan pixel tertimpa dari disk (kalau ada)
+    if (CanvasEngine.layerCanvasesReady && CanvasEngine.layerCanvasesReady[layer.id] === false) return null;
+    const cv = CanvasEngine.ensureLayerCanvas(layer);
+    if (!cv || !cv.width || !cv.height) return null;
+    const w = cv.width, h = cv.height;
+    const img = cv.getContext("2d").getImageData(0, 0, w, h);
+    const u32 = new Uint32Array(img.data.buffer);
+
+    const s = Math.min(1, this.DETECT_MAX / Math.max(w, h));
+    const lw = Math.max(1, Math.ceil(w * s)), lh = Math.max(1, Math.ceil(h * s));
+    const AMIN = this.ALPHA_MIN;
+
+    // 1. peta "ada gambar" resolusi kecil (alpha = byte tertinggi, little-endian)
+    const op = new Uint8Array(lw * lh);
+    // warna rata-rata per sel (dipakai untuk memisahkan bagian yang beda warna dalam SATU layer)
+    const cn = new Uint16Array(lw * lh);
+    const csr = new Uint32Array(lw * lh), csg = new Uint32Array(lw * lh), csb = new Uint32Array(lw * lh);
+    const cellX = new Int32Array(w);
+    for (let x = 0; x < w; x++) cellX[x] = Math.min(lw - 1, (x * s) | 0);
+    for (let y = 0; y < h; y++) {
+      const row = Math.min(lh - 1, (y * s) | 0) * lw;
+      const base = y * w;
+      for (let x = 0; x < w; x++) {
+        const px = u32[base + x];
+        if ((px >>> 24) > AMIN) {
+          const c = row + cellX[x];
+          op[c] = 1;
+          cn[c]++;
+          csr[c] += px & 255; csg[c] += (px >>> 8) & 255; csb[c] += (px >>> 16) & 255;
+        }
+      }
+    }
+
+    const cr = new Uint8Array(lw * lh), cg = new Uint8Array(lw * lh), cb = new Uint8Array(lw * lh);
+    for (let i = 0; i < cn.length; i++) {
+      if (!cn[i]) continue;
+      cr[i] = (csr[i] / cn[i]) | 0; cg[i] = (csg[i] / cn[i]) | 0; cb[i] = (csb[i] / cn[i]) | 0;
+    }
+    const tol = this.colorTol, tol2 = tol * tol;
+    // dua sel yang bersebelahan boleh menyatu kalau warnanya cukup mirip (atau salah satunya hanya sel celah)
+    const ok = (i, j) => {
+      if (tol2 === 0 || !op[i] || !op[j]) return true;
+      const dr = cr[i] - cr[j], dg = cg[i] - cg[j], db = cb[i] - cb[j];
+      return dr * dr + dg * dg + db * db < tol2;
+    };
+
+    // sel "murni" = warnanya sama dengan semua tetangganya (bukan sel campuran di garis pertemuan). Dipakai sebagai titik awal.
+    const pure = new Uint8Array(lw * lh);
+    if (tol2 > 0) {
+      const pt2 = tol2 * 0.16;
+      for (let y = 0; y < lh; y++) {
+        for (let x = 0; x < lw; x++) {
+          const i = y * lw + x;
+          if (!op[i]) continue;
+          let good = 1;
+          const chk = (j) => {
+            if (!op[j]) return;
+            const dr = cr[i] - cr[j], dg = cg[i] - cg[j], db = cb[i] - cb[j];
+            if (dr * dr + dg * dg + db * db > pt2) good = 0;
+          };
+          if (x > 0) chk(i - 1);
+          if (x < lw - 1) chk(i + 1);
+          if (y > 0) chk(i - lw);
+          if (y < lh - 1) chk(i + lw);
+          pure[i] = good;
+        }
+      }
+    }
+
+    // 2. gabung celah kecil + garis pembatas
+    const blocked = this._rasterDividers(layer, w, h, lw, lh, s);
+    const dil = this._dilate(op, lw, lh, Math.round(this.gap * s));
+
+    // 3. beri nomor tiap bentuk yang menyambung
+    const lab = new Uint16Array(lw * lh);
+    const stack = new Int32Array(lw * lh);
+    const areas = [0];
+    let next = 0;
+    // pass 0: mulai hanya dari sel murni; pass 1: sisa sel bergambar yang belum kebagian
+    for (let pass = 0; pass < 2; pass++) for (let i0 = 0; i0 < lw * lh; i0++) {
+      if (!dil[i0] || blocked[i0] || lab[i0]) continue;
+      if (tol2 > 0 && (!op[i0] || (pass === 0 && !pure[i0]))) continue;
+      if (next >= 60000) break;
+      next++;
+      let sp = 0, area = 0;
+      stack[sp++] = i0; lab[i0] = next;
+      while (sp) {
+        const i = stack[--sp];
+        area++;
+        const x = i % lw, y = (i / lw) | 0;
+        let j;
+        if (x > 0)      { j = i - 1;  if (dil[j] && !blocked[j] && !lab[j] && ok(i0, j)) { lab[j] = next; stack[sp++] = j; } }
+        if (x < lw - 1) { j = i + 1;  if (dil[j] && !blocked[j] && !lab[j] && ok(i0, j)) { lab[j] = next; stack[sp++] = j; } }
+        if (y > 0)      { j = i - lw; if (dil[j] && !blocked[j] && !lab[j] && ok(i0, j)) { lab[j] = next; stack[sp++] = j; } }
+        if (y < lh - 1) { j = i + lw; if (dil[j] && !blocked[j] && !lab[j] && ok(i0, j)) { lab[j] = next; stack[sp++] = j; } }
+      }
+      areas[next] = area;
+    }
+
+    // 4. simpan bagian terbesar saja, nomor dirapikan 1..n
+    const ids = [];
+    for (let k = 1; k <= next; k++) if (areas[k] >= this.MIN_CELLS) ids.push(k);
+    ids.sort((a, b) => areas[b] - areas[a]);
+    const keep = ids.slice(0, this.MAX_PARTS);
+    const remap = new Uint16Array(next + 1);
+    keep.forEach((old, idx) => { remap[old] = idx + 1; });
+    const n = keep.length;
+    const rec = { layerId: layer.id, w, h, s, lw, lh, lab, parts: {}, n, tol };
+    if (!n) return rec;
+    for (let i = 0; i < lab.length; i++) lab[i] = remap[lab[i]];
+
+    // 5. sel yang tertutup garis pembatas ikut bagian terdekat (tidak ada sisa yang tertinggal)
+    const queue = new Int32Array(lw * lh);
+    let qh = 0, qt = 0;
+    for (let i = 0; i < lab.length; i++) if (lab[i]) queue[qt++] = i;
+    while (qh < qt) {
+      const i = queue[qh++];
+      const x = i % lw, y = (i / lw) | 0;
+      let j;
+      if (x > 0)      { j = i - 1;  if (op[j] && !lab[j]) { lab[j] = lab[i]; queue[qt++] = j; } }
+      if (x < lw - 1) { j = i + 1;  if (op[j] && !lab[j]) { lab[j] = lab[i]; queue[qt++] = j; } }
+      if (y > 0)      { j = i - lw; if (op[j] && !lab[j]) { lab[j] = lab[i]; queue[qt++] = j; } }
+      if (y < lh - 1) { j = i + lw; if (op[j] && !lab[j]) { lab[j] = lab[i]; queue[qt++] = j; } }
+    }
+
+    // 5b. warna rata-rata tiap bagian + penanda sel yang bersebelahan dengan bagian lain (untuk memotong tepi per pixel)
+    const mr = new Float32Array(n + 1), mg = new Float32Array(n + 1), mb = new Float32Array(n + 1), mc = new Float32Array(n + 1);
+    for (let i = 0; i < lab.length; i++) {
+      const a = lab[i];
+      if (!a || !op[i]) continue;
+      mr[a] += cr[i]; mg[a] += cg[i]; mb[a] += cb[i]; mc[a]++;
+    }
+    for (let k = 1; k <= n; k++) if (mc[k]) { mr[k] /= mc[k]; mg[k] /= mc[k]; mb[k] /= mc[k]; }
+    const edge = new Uint8Array(lw * lh);
+    for (let y = 0; y < lh; y++) {
+      for (let x = 0; x < lw; x++) {
+        const a = lab[y * lw + x];
+        if (!a) continue;
+        let e = 0;
+        for (let dy = -1; dy <= 1 && !e; dy++) {
+          const yy = y + dy;
+          if (yy < 0 || yy >= lh) continue;
+          for (let dx = -1; dx <= 1; dx++) {
+            const xx = x + dx;
+            if (xx < 0 || xx >= lw) continue;
+            const b2 = lab[yy * lw + xx];
+            if (b2 && b2 !== a) { e = 1; break; }
+          }
+        }
+        edge[y * lw + x] = e;
+      }
+    }
+    rec.edge = edge; rec.mr = mr; rec.mg = mg; rec.mb = mb;
+
+    // 6. kotak batas + sel tepi tiap bagian (satu putaran di peta kecil)
+    const minX = new Int32Array(n + 1).fill(lw), minY = new Int32Array(n + 1).fill(lh);
+    const maxX = new Int32Array(n + 1).fill(-1), maxY = new Int32Array(n + 1).fill(-1);
+    const cnt = new Int32Array(n + 1);
+    const bnd = [];
+    for (let k = 0; k <= n; k++) bnd.push([]);
+    for (let y = 0; y < lh; y++) {
+      for (let x = 0; x < lw; x++) {
+        const i = y * lw + x;
+        const a = lab[i];
+        const r = x < lw - 1 ? lab[i + 1] : 0;
+        const d = y < lh - 1 ? lab[i + lw] : 0;
+        if (a) {
+          cnt[a]++;
+          if (x < minX[a]) minX[a] = x;
+          if (x > maxX[a]) maxX[a] = x;
+          if (y < minY[a]) minY[a] = y;
+          if (y > maxY[a]) maxY[a] = y;
+          if (x === 0 || y === 0) bnd[a].push(i);
+        }
+        if (a !== r) { if (a) bnd[a].push(i); if (r) bnd[r].push(i + 1); }
+        if (a !== d) { if (a) bnd[a].push(i); if (d) bnd[d].push(i + lw); }
+      }
+    }
+
+    for (let id = 1; id <= n; id++) {
+      if (!cnt[id]) continue;
+      const x0 = Math.max(0, Math.floor(minX[id] / s) - 2), y0 = Math.max(0, Math.floor(minY[id] / s) - 2);
+      const x1 = Math.min(w - 1, Math.ceil((maxX[id] + 1) / s) + 2), y1 = Math.min(h - 1, Math.ceil((maxY[id] + 1) / s) + 2);
+      const bbox = { x: x0, y: y0, w: x1 - x0 + 1, h: y1 - y0 + 1 };
+      const list = bnd[id];
+      const stride = Math.max(1, Math.ceil(list.length / 2000));
+      const pts = new Float32Array(Math.ceil(list.length / stride) * 2);
+      let q = 0;
+      for (let k = 0; k < list.length; k += stride) {
+        pts[q++] = ((list[k] % lw) + 0.5) / s;
+        pts[q++] = (((list[k] / lw) | 0) + 0.5) / s;
+      }
+      const cbox = { x: minX[id], y: minY[id], w: maxX[id] - minX[id] + 1, h: maxY[id] - minY[id] + 1 };
+      rec.parts[id] = { id, layerId: layer.id, bbox, cbox, area: cnt[id], pts, neon: null, _list: list, _lw: lw, _s: s, _glow2: n <= 6, refined: false };
+    }
+    return rec;
+  },
+
+  // Melebarkan peta "ada gambar" sejauh r sel (menggabung celah kecil).
+  _dilate(src, lw, lh, r) {
+    if (r <= 0) return src;
+    const tmp = new Uint8Array(lw * lh), out = new Uint8Array(lw * lh);
+    for (let y = 0; y < lh; y++) {
+      for (let x = 0; x < lw; x++) {
+        let v = 0;
+        for (let k = Math.max(0, x - r); k <= Math.min(lw - 1, x + r); k++) if (src[y * lw + k]) { v = 1; break; }
+        tmp[y * lw + x] = v;
+      }
+    }
+    for (let y = 0; y < lh; y++) {
+      for (let x = 0; x < lw; x++) {
+        let v = 0;
+        for (let k = Math.max(0, y - r); k <= Math.min(lh - 1, y + r); k++) if (tmp[k * lw + x]) { v = 1; break; }
+        out[y * lw + x] = v;
+      }
+    }
+    return out;
+  },
+
+  // Garis pembatas manual -> peta sel yang tidak boleh dilewati.
+  _rasterDividers(layer, w, h, lw, lh, s) {
+    const blocked = new Uint8Array(lw * lh);
+    if (!this.dividers.length) return blocked;
+    const c = document.createElement("canvas");
+    c.width = lw; c.height = lh;
+    const ctx = c.getContext("2d");
+    ctx.strokeStyle = "#000";
+    ctx.lineWidth = Math.max(2, this.DIVIDER_WIDTH * s);
+    ctx.lineCap = "round"; ctx.lineJoin = "round";
+    this.dividers.forEach(poly => {
+      if (poly.length < 2) return;
+      ctx.beginPath();
+      poly.forEach((p, i) => {
+        const lp = this.toLocal(layer, p, w, h);
+        if (i === 0) ctx.moveTo(lp.x * s, lp.y * s); else ctx.lineTo(lp.x * s, lp.y * s);
+      });
+      ctx.stroke();
+    });
+    const d = ctx.getImageData(0, 0, lw, lh).data;
+    for (let i = 0; i < blocked.length; i++) if (d[i * 4 + 3] > 20) blocked[i] = 1;
+    return blocked;
+  }
+}, "MeshPartEngine");
+
+/*
+  meshpart-neon.js
+  TUGAS     : membuat garis neon (kasar untuk semua bagian, halus untuk yang terpilih) dan menentukan bagian milik tiap pixel
+  BAGIAN DARI: MeshPartEngine
+  DIPANGGIL OLEH: meshpart-detect.js, meshpart-analyze.js, meshpart-group.js, meshpart-warp.js, meshpart-commit.js
+  MEMANGGIL : meshpart-detect.js (_freeCanvas)
+  EVENT     : tidak ada
+  KALAU RUSAK: neon tidak muncul / neon kotak-kotak / tap tidak kena bagian yang benar
+*/
+Modul.extend(MeshPartEngine, "meshpart-neon.js", {
+  _lineT() {
+    const sc = CanvasEngine.getTouchRadius() / 26;
+    return Math.max(1, Math.min(3, Math.round(0.8 * sc)));
+  },
+
+  // Garis neon satu bagian, dibuat di peta KECIL (murah), nanti diperbesar halus saat digambar.
+  _makeNeon(list, cbox, lw, s, glow2) {
+    const tc = Math.max(1, Math.round(this._lineT() * s));
+    const pad = tc + 6;
+    const W = cbox.w + pad * 2, H = cbox.h + pad * 2;
+    const tmp = document.createElement("canvas");
+    tmp.width = W; tmp.height = H;
+    const tctx = tmp.getContext("2d");
+    const img = tctx.createImageData(W, H);
+    const d = img.data;
+    for (let k = 0; k < list.length; k++) {
+      const x = (list[k] % lw) - cbox.x + pad;
+      const y = ((list[k] / lw) | 0) - cbox.y + pad;
+      if (x < 0 || y < 0 || x >= W || y >= H) continue;
+      const o = (y * W + x) * 4;
+      d[o + 3] = 255;
+    }
+    tctx.putImageData(img, 0, 0);
+    // warnai garis dengan warna tema
+    const color = this._themeColor();
+    tctx.globalCompositeOperation = "source-in";
+    tctx.fillStyle = color;
+    tctx.fillRect(0, 0, W, H);
+
+    // Tebalkan garis TANPA bayangan (murah), lalu bayangan cahaya hanya 2x (dulu 5-29x: inilah yang bikin lemot).
+    const thick = document.createElement("canvas");
+    thick.width = W; thick.height = H;
+    const kc = thick.getContext("2d");
+    for (let dy = -tc; dy <= tc; dy++) {
+      for (let dx = -tc; dx <= tc; dx++) {
+        if (dx * dx + dy * dy <= tc * tc) kc.drawImage(tmp, dx, dy);
+      }
+    }
+    const out = document.createElement("canvas");
+    out.width = W; out.height = H;
+    const oc = out.getContext("2d");
+    oc.shadowColor = color;
+    oc.shadowBlur = 3 + tc * 2;
+    oc.drawImage(thick, 0, 0);
+    if (glow2) oc.drawImage(thick, 0, 0);   // bagian banyak (>6): cukup 1x supaya analisis tidak berat
+    this._freeCanvas(tmp); this._freeCanvas(thick);
+    return { canvas: out, x: (cbox.x - pad) / s, y: (cbox.y - pad) / s, w: W / s, h: H / s };
+  },
+
+  // Neon halus: siluet bagian diambil dari ALPHA gambar yang sebenarnya (bukan dari peta sel kecil), jadi garis neon
+  // mulus mengikuti tepi gambar. Peta sel hanya dipakai untuk memisahkan bagian yang saling menempel.
+  // Lubang kecil di dalam bagian ditutup supaya tidak muncul garis neon di dalam.
+  _refineNeon(rec, part) {
+    const layer = ProjectStore.getLayerById(rec.layerId);
+    const cv = layer && CanvasEngine.ensureLayerCanvas(layer);
+    if (!cv || cv.width !== rec.w || cv.height !== rec.h) return this._refineNeonCells(rec, part);
+    const s = rec.s, lw = rec.lw, lh = rec.lh, lab = rec.lab, lut = this._memberLut(rec, part), b = part.bbox;
+    const u = Math.min(1, 900 / Math.max(b.w, b.h));
+    const t = Math.max(1, Math.round(this._lineT() * u));
+    const pad = t + 8;
+    const sw = Math.max(1, Math.ceil(b.w * u)), sh = Math.max(1, Math.ceil(b.h * u));
+    const sc = document.createElement("canvas");
+    sc.width = sw; sc.height = sh;
+    const sctx = sc.getContext("2d", { willReadFrequently: true });
+    sctx.imageSmoothingEnabled = true;
+    sctx.drawImage(cv, b.x, b.y, b.w, b.h, 0, 0, sw, sh);
+    const src = sctx.getImageData(0, 0, sw, sh).data;
+    this._freeCanvas(sc);
+    const W = sw + pad * 2, H = sh + pad * 2;
+    const inside = new Uint8Array(W * H);
+    for (let y = 0; y < sh; y++) {
+      const cy = Math.min(lh - 1, ((b.y + y / u) * s) | 0) * lw;
+      for (let x = 0; x < sw; x++) {
+        if (src[(y * sw + x) * 4 + 3] <= 100) continue;
+        const cx = Math.min(lw - 1, ((b.x + x / u) * s) | 0);
+        if (lut[lab[cy + cx]]) inside[(y + pad) * W + x + pad] = 1;
+      }
+    }
+    // tutup lubang: semua yang tidak terhubung ke luar dianggap bagian dalam
+    const outside = new Uint8Array(W * H);
+    const stack = new Int32Array(W * H);
+    let sp = 0;
+    outside[0] = 1; stack[sp++] = 0;
+    while (sp) {
+      const i = stack[--sp];
+      const x = i % W, y = (i / W) | 0;
+      let j;
+      if (x > 0)     { j = i - 1; if (!inside[j] && !outside[j]) { outside[j] = 1; stack[sp++] = j; } }
+      if (x < W - 1) { j = i + 1; if (!inside[j] && !outside[j]) { outside[j] = 1; stack[sp++] = j; } }
+      if (y > 0)     { j = i - W; if (!inside[j] && !outside[j]) { outside[j] = 1; stack[sp++] = j; } }
+      if (y < H - 1) { j = i + W; if (!inside[j] && !outside[j]) { outside[j] = 1; stack[sp++] = j; } }
+    }
+    for (let i = 0; i < inside.length; i++) if (!outside[i]) inside[i] = 1;
+    return this._neonFromInside(inside, W, H, t, b, pad, u);
+  },
+
+  // Garis neon dari peta "bagian dalam" (inside) ukuran W x H.
+  _neonFromInside(inside, W, H, t, b, pad, u) {
+    const tmp = document.createElement("canvas");
+    tmp.width = W; tmp.height = H;
+    const tctx = tmp.getContext("2d");
+    const timg = tctx.createImageData(W, H);
+    for (let y = 0; y < H; y++) {
+      for (let x = 0; x < W; x++) {
+ const i = y * W + x;
+        if (!inside[i]) continue;
+        const edge = x === 0 || y === 0 || x === W - 1 || y === H - 1 ||
+          !inside[i - 1] || !inside[i + 1] || !inside[i - W] || !inside[i + W];
+        if (edge) timg.data[i * 4 + 3] = 255;
+      }
+    }
+    tctx.putImageData(timg, 0, 0);
+    const color = this._themeColor();
+    tctx.globalCompositeOperation = "source-in";
+    tctx.fillStyle = color;
+    tctx.fillRect(0, 0, W, H);
+
+    // Tebalkan garis TANPA bayangan, lalu bayangan cahaya hanya 2x (dulu sampai 29x di kanvas besar = lemot saat tap bagian).
+    const thick = document.createElement("canvas");
+    thick.width = W; thick.height = H;
+    const kc = thick.getContext("2d");
+    for (let dy = -t; dy <= t; dy++) {
+      for (let dx = -t; dx <= t; dx++) {
+        if (dx * dx + dy * dy <= t * t) kc.drawImage(tmp, dx, dy);
+      }
+    }
+    const out = document.createElement("canvas");
+    out.width = W; out.height = H;
+    const oc = out.getContext("2d");
+    oc.shadowColor = color;
+    oc.shadowBlur = 3 + t * 2;
+    oc.drawImage(thick, 0, 0);
+    oc.drawImage(thick, 0, 0);
+    this._freeCanvas(tmp); this._freeCanvas(thick);
+    return { canvas: out, x: b.x - pad / u, y: b.y - pad / u, w: W / u, h: H / u };
+  },
+
+  // Neon halus: topeng sel dilunakkan 1x, diperbesar mulus ke resolusi layar, lalu dipotong di ambang 50%
+  // (hasilnya kontur yang membulat, bukan tangga). Tepi diambil dari hasil potongan itu.
+  _refineNeonCells(rec, part) {
+    const s = rec.s, lw = rec.lw, lab = rec.lab, lut = this._memberLut(rec, part), cb = part.cbox, b = part.bbox;
+    const u = Math.min(1, 900 / Math.max(b.w, b.h));
+    const t = Math.max(1, Math.round(this._lineT() * u));
+    const pad = t + 8;
+
+    const mw = cb.w + 4, mh = cb.h + 4;
+    const m = new Float32Array(mw * mh), m2 = new Float32Array(mw * mh);
+    for (let y = 0; y < cb.h; y++) {
+      for (let x = 0; x < cb.w; x++) {
+        if (lut[lab[(cb.y + y) * lw + cb.x + x]]) m[(y + 2) * mw + x + 2] = 1;
+      }
+    }
+    for (let y = 0; y < mh; y++) {            // lunakkan 3 sel (mendatar lalu menurun)
+      for (let x = 0; x < mw; x++) {
+        let a = 0;
+        for (let k = -1; k <= 1; k++) { const xx = x + k; if (xx >= 0 && xx < mw) a += m[y * mw + xx]; }
+        m2[y * mw + x] = a / 3;
+      }
+    }
+    const mc = document.createElement("canvas");
+    mc.width = mw; mc.height = mh;
+    const mctx = mc.getContext("2d");
+    const mimg = mctx.createImageData(mw, mh);
+    for (let y = 0; y < mh; y++) {
+      for (let x = 0; x < mw; x++) {
+        let a = 0;
+        for (let k = -1; k <= 1; k++) { const yy = y + k; if (yy >= 0 && yy < mh) a += m2[yy * mw + x]; }
+        mimg.data[(y * mw + x) * 4 + 3] = Math.min(255, Math.round((a / 3) * 255));
+      }
+    }
+    mctx.putImageData(mimg, 0, 0);
+
+    const W = Math.ceil(b.w * u) + pad * 2, H = Math.ceil(b.h * u) + pad * 2;
+    const big = document.createElement("canvas");
+    big.width = W; big.height = H;
+    const bc = big.getContext("2d");
+    bc.imageSmoothingEnabled = true;
+    bc.drawImage(mc, 0, 0, mw, mh, ((cb.x - 2) / s - b.x) * u + pad, ((cb.y - 2) / s - b.y) * u + pad, (mw / s) * u, (mh / s) * u);
+    const src = bc.getImageData(0, 0, W, H).data;
+
+    const inside = new Uint8Array(W * H);
+    for (let i = 0; i < inside.length; i++) inside[i] = src[i * 4 + 3] > 80 ? 1 : 0;
+    const tmp = document.createElement("canvas");
+    tmp.width = W; tmp.height = H;
+    const tctx = tmp.getContext("2d");
+    const timg = tctx.createImageData(W, H);
+    for (let y = 0; y < H; y++) {
+      for (let x = 0; x < W; x++) {
+ const i = y * W + x;
+        if (!inside[i]) continue;
+        const edge = x === 0 || y === 0 || x === W - 1 || y === H - 1 ||
+          !inside[i - 1] || !inside[i + 1] || !inside[i - W] || !inside[i + W];
+        if (edge) timg.data[i * 4 + 3] = 255;
+      }
+    }
+    tctx.putImageData(timg, 0, 0);
+    const color = this._themeColor();
+    tctx.globalCompositeOperation = "source-in";
+    tctx.fillStyle = color;
+    tctx.fillRect(0, 0, W, H);
+
+    // Tebalkan garis TANPA bayangan, lalu bayangan cahaya hanya 2x (dulu sampai 29x di kanvas besar = lemot saat tap bagian).
+    const thick = document.createElement("canvas");
+    thick.width = W; thick.height = H;
+    const kc = thick.getContext("2d");
+    for (let dy = -t; dy <= t; dy++) {
+      for (let dx = -t; dx <= t; dx++) {
+        if (dx * dx + dy * dy <= t * t) kc.drawImage(tmp, dx, dy);
+      }
+    }
+    const out = document.createElement("canvas");
+    out.width = W; out.height = H;
+    const oc = out.getContext("2d");
+    oc.shadowColor = color;
+    oc.shadowBlur = 3 + t * 2;
+    oc.drawImage(thick, 0, 0);
+    oc.drawImage(thick, 0, 0);
+    this._freeCanvas(mc); this._freeCanvas(big); this._freeCanvas(tmp); this._freeCanvas(thick);
+    return { canvas: out, x: b.x - pad / u, y: b.y - pad / u, w: W / u, h: H / u };
+  },
+
+  // Pixel di sel tepi (dua bagian bertemu): pilih bagian yang warna rata-ratanya paling mirip dengan pixel itu,
+  // supaya garis potong mengikuti batas warna yang sebenarnya, bukan kotak-kotak sel.
+  _pixelLabel(rec, c, r, g, b, own) {
+    const lw = rec.lw, lh = rec.lh, lab = rec.lab;
+    const cx = c % lw, cy = (c / lw) | 0;
+    let best = own, bd = Infinity;
+    for (let dy = -2; dy <= 2; dy++) {
+      const yy = cy + dy;
+      if (yy < 0 || yy >= lh) continue;
+      for (let dx = -2; dx <= 2; dx++) {
+        const xx = cx + dx;
+        if (xx < 0 || xx >= lw) continue;
+        const L = lab[yy * lw + xx];
+        if (!L) continue;
+        const d0 = r - rec.mr[L], d1 = g - rec.mg[L], d2 = b - rec.mb[L];
+        const dd = d0 * d0 + d1 * d1 + d2 * d2 - (L === own ? 1 : 0);   // seri -> bagian sel itu sendiri
+        if (dd < bd) { bd = dd; best = L; }
+      }
+    }
+    return best;
+  },
+
+  // Label di titik lokal; kalau kosong, cari yang terdekat dalam radius R (px kanvas).
+  _labelNear(rec, x, y, R) {
+    const s = rec.s, lw = rec.lw, lh = rec.lh;
+    const at = (px, py) => {
+      const cx = Math.floor(px * s), cy = Math.floor(py * s);
+      if (cx < 0 || cy < 0 || cx >= lw || cy >= lh) return 0;
+      return rec.lab[cy * lw + cx];
+    };
+    let v = at(x, y);
+    if (v) return v;
+    const step = Math.max(2, R / 8);
+    for (let r = step; r <= R; r += step) {
+      const n = Math.max(8, Math.round(r / 2));
+      for (let k = 0; k < n; k++) {
+        const a = (Math.PI * 2 * k) / n;
+        v = at(x + Math.cos(a) * r, y + Math.sin(a) * r);
+        if (v) return v;
+      }
+    }
+    return 0;
+  }
+}, "MeshPartEngine");
+
+/*
+  meshpart-commit.js
+  TUGAS     : jari diangkat: neon sementara hasil tarikan, simpanan pixel bagian lain yang tertimpa (under), simpan hasil ke layer, analisis ulang
+  BAGIAN DARI: MeshPartEngine
+  DIPANGGIL OLEH: meshpart-pointer.js (handlePointerUp), meshpart-warp.js, meshpart-capture.js
+  MEMANGGIL : meshpart-warp.js (_pullRender), CanvasEngine.finishStroke, meshpart-detect.js
+  EVENT     : tidak ada
+  KALAU RUSAK: hasil tarikan hilang setelah dilepas / Undo tidak mengembalikan / neon tidak ikut bentuk baru / wajah di bawah rambut hilang
+*/
+Modul.extend(MeshPartEngine, "meshpart-commit.js", {
+  // ===== Pixel bagian lain yang tertutup bagian yang ditarik =====
+  // Layer adalah satu gambar datar: begitu rambut ditarik menutupi wajah (bagian lain), pixel wajah di bawahnya tertimpa dan hilang.
+  // Supaya wajah tidak rusak waktu rambut ditarik keluar lagi, pixel yang tertimpa DISIMPAN (kanvas tersembunyi per layer)
+  // dan dimunculkan lagi di tempat yang sudah tidak tertutup. Yang tidak pernah ada (tempat asal rambut) tetap kosong.
+
+  _underHash(cv) {
+    const t = this._mkCanvas(40, 40);
+    const tx = t.getContext("2d", { willReadFrequently: true });
+    tx.imageSmoothingEnabled = true;
+    try { tx.imageSmoothingQuality = "high"; } catch (e) { /* abaikan */ }
+    tx.drawImage(cv, 0, 0, 40, 40);
+    const a = tx.getImageData(0, 0, 40, 40).data;
+    let h = 0;
+    for (let i = 0; i < a.length; i++) h = (h * 31 + a[i]) | 0;
+    this._freeCanvas(t);
+    return h + ":" + cv.width + "x" + cv.height;
+  },
+
+  // Simpanan dipakai hanya kalau layer masih persis seperti sesudah tarikan terakhir (kalau Undo / digambar lagi: dibuang).
+  _underGet(layer, cv) {
+    const e = this.under[layer.id];
+    if (!e) return null;
+    const p = ProjectStore.getProject();
+    if (!this._underSync(e, this._underHash(cv), p ? p.currentFrame : 0, cv.width, cv.height)) {
+      this._underDrop(layer.id, e.frame !== (p ? p.currentFrame : 0));
+      return null;
+    }
+    return e;
+  },
+
+  _underDrop(id, keepDisk) {
+    const e = this.under[id];
+    if (e) { this._freeCanvas(e.canvas); delete this.under[id]; if (!keepDisk && this._underDbDel) this._underDbDel(id, e.frame); }
+  },
+
+  _underClear() {
+    Object.keys(this.under || {}).forEach(k => this._underDrop(k));
+  },
+
+  _underUpdate(d) {
+    const L = d._last;
+    if (!L || !d.rect || !d.base) return;
+    const layer = ProjectStore.getLayerById(d.layerId);
+    const cv = layer && CanvasEngine.ensureLayerCanvas(layer);
+    if (!cv) return;
+    const X0 = d.rect.x0, Y0 = d.rect.y0, w = d.rect.x1 - d.rect.x0, h = d.rect.y1 - d.rect.y0;
+    if (w < 1 || h < 1) return;
+    const dstX = L.x0r - X0, dstY = L.y0r - Y0;
+
+    // topeng "tertutup bagian yang ditarik" (tepi halus dipadatkan supaya pixel tepi tidak jadi setengah transparan)
+    const mk = this._mkCanvas(w, h);
+    const mx = mk.getContext("2d");
+    for (let i = 0; i < 3; i++) mx.drawImage(L.wp, 0, 0, L.ww, L.wh, dstX, dstY, L.rw, L.rh);
+
+    // pixel bagian lain yang sekarang tertutup
+    const occ = this._mkCanvas(w, h);
+    const ox = occ.getContext("2d");
+    ox.drawImage(d.base, X0, Y0, w, h, 0, 0, w, h);
+    ox.globalCompositeOperation = "destination-in";
+    ox.drawImage(mk, 0, 0);
+    ox.globalCompositeOperation = "source-over";
+
+    let has = false;
+    const t = this._mkCanvas(32, 32);
+    const tx = t.getContext("2d", { willReadFrequently: true });
+    tx.drawImage(occ, 0, 0, 32, 32);
+    const a = tx.getImageData(0, 0, 32, 32).data;
+    for (let i = 3; i < a.length; i += 4) if (a[i] > 0) { has = true; break; }
+    this._freeCanvas(t);
+
+    let e = this.under[d.layerId];
+    if (!has && !e) { this._freeCanvas(mk); this._freeCanvas(occ); return; }
+    if (!e) {
+      const uc = this._mkCanvas(cv.width, cv.height);
+      e = this.under[d.layerId] = { canvas: uc, frame: 0, hash: d.preHash || "", hist: [], redo: [] };
+    }
+    const ux = e.canvas.getContext("2d", { willReadFrequently: true });
+    const prevImg = ux.getImageData(X0, Y0, w, h);
+    // simpanan lama yang MASIH tertutup tetap disimpan; yang sudah muncul kembali (sudah ada di layer) dibuang dari simpanan
+    const old = this._mkCanvas(w, h);
+    const oc = old.getContext("2d");
+    oc.drawImage(e.canvas, X0, Y0, w, h, 0, 0, w, h);
+    // tetap disimpan: yang masih tertutup bagian yang ditarik ATAU masih tertutup bagian lain yang diam (gambar layer di atasnya)
+    const kp = this._mkCanvas(w, h);
+    const kx = kp.getContext("2d");
+    kx.drawImage(mk, 0, 0);
+    kx.drawImage(d.base, X0, Y0, w, h, 0, 0, w, h);
+    oc.globalCompositeOperation = "destination-in";
+    oc.drawImage(kp, 0, 0);
+    this._freeCanvas(kp);
+    oc.globalCompositeOperation = "source-over";
+    ux.clearRect(X0, Y0, w, h);
+    ux.drawImage(old, X0, Y0);
+    ux.drawImage(occ, X0, Y0);   // yang baru tertutup ada di atas simpanan lama
+    this._freeCanvas(old); this._freeCanvas(mk); this._freeCanvas(occ);
+    const p = ProjectStore.getProject();
+    e.frame = p ? p.currentFrame : 0;
+    this._underRecord(e, e.hash, this._underHash(cv), { x: X0, y: Y0, prev: prevImg, next: ux.getImageData(X0, Y0, w, h) });
+  },
+
+  _dropPullNeon() {
+    const pn = this.pullNeon;
+    this.pullNeon = null;
+    if (!pn) return;
+    this._freeCanvas(pn.canvas); this._freeCanvas(pn.sil); this._freeCanvas(pn.ring);
+  },
+
+  // Neon sementara = garis tepi BENTUK BARU (hasil warp bagian itu), dibuat dari siluet yang digeser ke 8 arah lalu
+  // dikurangi siluetnya sendiri. Dibuat di resolusi kecil (maks 700 px) supaya ringan.
+  // wp = kanvas hasil warp bagian (ww x wh) yang menempati kotak (rx0, ry0, rw, rh) di koordinat layer.
+  _pullNeonUpdate(d, wp, ww, wh, rx0, ry0, rw, rh, fine) {
+    // Selagi menarik, neon cukup diperbarui tiap ~45 ms (neon-lah yang paling berat per frame).
+    const nowT = performance.now();
+    const old = this.pullNeon;
+    if (!fine && old && old.layerId === d.layerId && nowT - (old.last || 0) < 45) return;
+    const b = d.bbox;
+    let x0 = b.x, y0 = b.y, x1 = b.x + b.w, y1 = b.y + b.h;
+    if (d.rect) { x0 = Math.min(x0, d.rect.x0); y0 = Math.min(y0, d.rect.y0); x1 = Math.max(x1, d.rect.x1); y1 = Math.max(y1, d.rect.y1); }
+    const gw0 = x1 - x0, gh0 = y1 - y0;
+    const u = Math.min(1, (fine ? 700 : 300) / Math.max(gw0, gh0));   // selagi menarik: lebih kecil & tanpa bayangan (ringan)
+    const t = Math.max(1, Math.round(this._lineT() * u));
+    const pad = t + 6;
+    const W = Math.ceil(gw0 * u) + pad * 2, H = Math.ceil(gh0 * u) + pad * 2;
+    let pn = this.pullNeon;
+    if (!pn || pn.layerId !== d.layerId) {
+      this._dropPullNeon();
+      pn = this.pullNeon = { layerId: d.layerId, canvas: this._mkCanvas(W, H), sil: this._mkCanvas(W, H), ring: this._mkCanvas(W, H), x: 0, y: 0, w: 0, h: 0 };
+    }
+    ["canvas", "sil", "ring"].forEach(key => {
+      const c = pn[key];
+      if (c.width !== W || c.height !== H) { c.width = W; c.height = H; }
+      else c.getContext("2d").clearRect(0, 0, W, H);
+    });
+
+    // 1. siluet bentuk baru = hasil warp bagian itu
+    const sx = pn.sil.getContext("2d");
+    sx.imageSmoothingEnabled = true;
+    sx.drawImage(wp, 0, 0, ww, wh, (rx0 - x0) * u + pad, (ry0 - y0) * u + pad, rw * u, rh * u);
+
+    // 2. cincin tepi: siluet digeser ke 8 arah, diwarnai, lalu siluet aslinya dihapus
+    const rx = pn.ring.getContext("2d");
+    const r2 = t * 0.7071;
+    [[0, 0], [t, 0], [-t, 0], [0, t], [0, -t], [r2, r2], [-r2, r2], [r2, -r2], [-r2, -r2]].forEach(o => rx.drawImage(pn.sil, o[0], o[1]));
+    const color = this._themeColor();
+    rx.globalCompositeOperation = "source-in";
+    rx.fillStyle = color;
+    rx.fillRect(0, 0, W, H);
+    rx.globalCompositeOperation = "destination-out";
+    rx.drawImage(pn.sil, 0, 0);
+    rx.globalCompositeOperation = "source-over";
+
+    // 3. cahaya neon
+    const ox = pn.canvas.getContext("2d");
+    if (fine) { ox.shadowColor = color; ox.shadowBlur = 3 + t * 2; }
+    ox.drawImage(pn.ring, 0, 0);
+    ox.drawImage(pn.ring, 0, 0);
+
+    pn.x = x0 - pad / u; pn.y = y0 - pad / u; pn.w = W / u; pn.h = H / u;
+    pn.last = nowT;
+  },
+
+  // Jari diangkat: render halus, simpan ke layer (sekali), analisis ulang, pilihan dipertahankan.
+  // Urutan (supaya hasil tarikan muncul LANGSUNG, tidak menunggu pekerjaan belakangan):
+  //   1. render halus + tempel ke layer  2. tandai analisis ulang "tertunda" (neon disembunyikan sebentar)
+  //   3. simpan gambar (finishStroke, async)  4. layar sempat tergambar  5. baru analisis ulang HANYA layer ini
+  _pullCommit(d) {
+    try {
+      // Data siap-pakai di muka milik bagian ini ikut dibebaskan di akhir (gambar layer berubah, jadi sudah basi).
+      const rec0 = this.recs[d.layerId];
+      const part0 = this._partById(rec0, d.partId);
+      if (part0) part0._prep = null;
+      const subs = (d.subs || []).slice();
+      subs.forEach(sd => { const pp = this._partById(this.recs[sd.layerId], sd.partId); if (pp) pp._prep = null; });
+      this._pullKeepAll = (this.selPts && this.selPts.length > 1) ? this._selKeepAll() : null;
+      this._pullRender(d, true);
+      subs.concat([d]).forEach(x => {
+        try { this._underUpdate(x); } catch (err) { console.error("Mesh- simpan pixel tertutup gagal:", err); }
+      });
+      this.pull = null;
+      this._ignoreUntil = Date.now() + 1500;
+      this._pendingMulti = subs.length > 0;
+      this._dirtyLayers = {};   // neon layer-layer ini basi sampai analisis ulang selesai: disembunyikan, bukan ditampilkan salah tempat
+      subs.concat([d]).forEach(x => { this._dirtyLayers[x.layerId] = 1; });
+
+      const layer = ProjectStore.getLayerById(d.layerId);
+      const rec = this.recs[d.layerId];
+      if (layer && rec) {
+        const lp = this.toLocal(layer, d.cur, rec.w, rec.h);
+        this.selPoint = { layerId: d.layerId, x: lp.x, y: lp.y };
+        // Titik jari ada di TEPI bentuk dan bisa meleset dari bagian itu setelah berubah bentuk, jadi coba
+        // beberapa titik dari tepi menuju tengah sampai ketemu bagian yang sama. Neon tetap menyala.
+        this._pullKeepSelection = { layerId: d.layerId, pts: this._keepPoints(d, lp), bbox: { x: d.bbox.x, y: d.bbox.y, w: d.bbox.w, h: d.bbox.h } };
+      }
+      // Perubahan yang terjadi selama tarikan (riwayat Undo dsb) adalah perubahan kita sendiri: bukan alasan analisis penuh.
+      this.dirty = false;
+      this._pendingAnalyze = d.layerId;
+      this._analyzing = true;
+
+      CanvasEngine.finishStroke();
+      // layer lain yang ikut ditarik: simpan gambarnya juga (finishStroke cuma menyimpan layer aktif)
+      subs.forEach(sd => {
+        try {
+          const l2 = ProjectStore.getLayerById(sd.layerId);
+          const c2 = l2 && CanvasEngine.ensureLayerCanvas(l2);
+          if (!c2) return;
+          if (typeof EventBus !== "undefined") EventBus.emit("layer:thumbnail-dirty", { layerId: l2.id });
+          CanvasEngine.strokeCelThumb(l2, c2);
+          CanvasEngine.strokeEncodeSave(l2, c2);
+        } catch (err) { console.error("Mesh- simpan layer lain gagal:", err); }
+      });
+      this._markSelfSave(d.layerId, subs.map(x => x.layerId));
+
+      requestAnimationFrame(() => setTimeout(() => {
+        if (this._pendingAnalyze === d.layerId) this._flushAnalyze();
+      }, 0));
+    } catch (err) {
+      console.error("Mesh- simpan tarikan gagal:", err);
+      this.pull = null;
+      this._pendingAnalyze = null;
+      this._analyzing = false;
+      this.dirty = true;
+      CanvasEngine.compositeAll();
+    }
+    this._freePull(d);
+  }
+}, "MeshPartEngine");
 
 /*
   meshpanel.js
@@ -15854,6 +19088,8 @@ Modul.extend(MeshEngine, "mesh-create.js", {
       snapshotOffset: { x: cropX, y: cropY }
     };
 
+    try { if (typeof MeshPartEngine !== "undefined" && MeshPartEngine._followMeshCreate) MeshPartEngine._followMeshCreate(layer, meshArea); } catch (err) { console.error("Mesh- follow gagal:", err); }
+
     // Mesh lama otomatis dianggap Selesai: titiknya tidak menimpa / bentrok dengan Mesh yang baru ini.
     (layer.meshAreas || []).forEach(m => { m.finished = true; });
     const updated = [...(layer.meshAreas || []), meshArea];
@@ -16304,6 +19540,9 @@ Modul.extend(MeshEngine, "mesh-pointer.js", {
     }
     this.draggingVertexIndex = isPinned ? null : closestIndex;
     this.draggingMeshId = mesh.id;
+    // Mesh-: simpanan gambar tersembunyi ikut ditarik waktu jari diangkat (lihat mesh-vertex.js)
+    this._followTok = null;
+    try { if (this.draggingVertexIndex !== null && typeof MeshPartEngine !== "undefined" && MeshPartEngine._followMeshBegin) this._followTok = MeshPartEngine._followMeshBegin(layer); } catch (err) { console.error("Mesh- follow gagal:", err); }
   }
 }, "MeshEngine");
 
@@ -16352,6 +19591,12 @@ Modul.extend(MeshEngine, "mesh-vertex.js", {
       // Hasil warp ditempel permanen ke imageData layer SEKALI di sini
       // (pas jari diangkat) -- bukan berkali-kali selama drag.
       CanvasEngine.finishStroke();
+      // Mesh-: simpanan gambar tersembunyi ikut ditarik sama seperti layernya
+      const tok = this._followTok; this._followTok = null;
+      try {
+        const m = tok && (layer.meshAreas || []).find(x => x.id === this.draggingMeshId);
+        if (m && typeof MeshPartEngine !== "undefined") MeshPartEngine._followMeshEnd(tok, layer, m);
+      } catch (err) { console.error("Mesh- follow gagal:", err); }
     }
   },
 
@@ -17234,6 +20479,8 @@ const Toolbar = {
       icon: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"><path d="M4 6h16M4 12h16M4 18h16M8 4v16M16 4v16"/></svg>' },
     { id: "mesh-transform", label: "Mesh+", hasSubmenu: false,
       icon: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"><path d="M3 5h12M3 11h12M3 17h12M7 3v16"/><path d="M18 4v8M14 8h8"/></svg>' },
+    { id: "mesh-part", label: "Mesh-", hasSubmenu: false,
+      icon: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"><path d="M3 5h12M3 11h12M3 17h12M7 3v16"/><path d="M14 8h8"/></svg>' },
     { id: "ruler", label: "Ruler", hasSubmenu: true,
       icon: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="8" width="18" height="8" rx="1"/><path d="M6 8v3M9 8v2M12 8v3M15 8v2M18 8v3"/></svg>' },
     { id: "move", label: "Move", hasSubmenu: false,
@@ -18341,7 +21588,7 @@ Modul.extend(LayerPanel, "layer-init.js", {
     // Mesh Transformation: pas tool "mesh-transform" aktif, Layer Panel
     // pindah ke mode pilih-banyak-layer (checkbox).
    EventBus.on("tool:changed", (toolId) => {
-      this.multiSelectMode = (toolId === "mesh-transform" || toolId === "move");
+      this.multiSelectMode = (toolId === "mesh-transform" || toolId === "move" || toolId === "mesh-part");
       this.multiSelectPurpose = toolId;
       if (!this.multiSelectMode) this.selectedLayerIds = [];
 
@@ -18453,7 +21700,11 @@ Modul.extend(LayerPanel, "layer-list.js", {
             <button id="layer-add-btn" class="layerpanel-add-btn">+</button>
           </div>
         </div>
-        ${this.multiSelectMode ? `
+        ${this.multiSelectMode && this.multiSelectPurpose === "mesh-part" ? `
+          <div class="layerpanel-multiselect-bar">
+            <span class="layerpanel-multiselect-hint">Centang layer yang mau dipecah jadi bagian (kosong = layer aktif)</span>
+          </div>
+        ` : this.multiSelectMode ? `
           <div class="layerpanel-multiselect-bar">
             <span class="layerpanel-multiselect-hint">Pilih min. 2 layer</span>
             ${this.multiSelectPurpose === "mesh-transform" ? `
@@ -20622,7 +23873,7 @@ Modul.extend(ZoomEngine, "zoom-pan.js", {
       const rec = SceneRec._rec;
       if (!rec || rec.paused || rec.retake || rec.stopping) return false;
       const t = CanvasEngine.activeTool;
-      return !(t === "move" || t === "mesh" || t === "mesh-transform" || t === "eyedropper");
+      return !(t === "move" || t === "mesh" || t === "mesh-transform" || t === "mesh-part" || t === "eyedropper");
     } catch (err) { return false; }
   },
 
@@ -20686,7 +23937,13 @@ Modul.extend(ZoomEngine, "zoom-pinch.js", {
     this.area.addEventListener("pointermove", (e) => this.onPointerMove(e), { capture: true });
     this.area.addEventListener("pointerup", (e) => this.onPointerUp(e), { capture: true });
     this.area.addEventListener("pointercancel", (e) => this.onPointerUp(e), { capture: true });
-    this.area.addEventListener("dblclick", () => this.resetView());
+    // Ketuk dua kali = kembali ke zoom awal, KECUALI lagi pakai alat yang butuh ketuk dua kali
+    // (Mesh: pin/lepas pin titik; Lasso/Seleksi dll) -- kalau tidak, zoom ikut ke-reset.
+    this.area.addEventListener("dblclick", () => {
+      const tool = (typeof CanvasEngine !== "undefined") ? CanvasEngine.activeTool : null;
+      if (["mesh", "mesh-transform", "mesh-part", "lasso", "selection", "magic-wand"].includes(tool)) return;
+      this.resetView();
+    });
     // Listener di window cukup SEKALI seumur app (bindEvents jalan tiap buka project).
     if (!this._windowBound) {
       this._windowBound = true;
@@ -20817,6 +24074,8 @@ Modul.extend(ZoomEngine, "zoom-transform.js", {
     this.wrapper.style.transform = `translate(${ox}px, ${oy}px) rotate(${r}rad) scale(${s})`;
     this.wrapper.classList.toggle("canvas-zoomed-out", s < 1 || r !== 0);
     try { if (typeof SceneCam !== "undefined") SceneCam.liveRefresh(); } catch (err) { /* abaikan */ }
+    // Tombol "Buat Mesh" ikut diatur ulang (ukurannya dijaga tetap walau canvas di-zoom).
+    try { if (typeof CanvasEngine !== "undefined" && CanvasEngine.positionCreateMeshButton) CanvasEngine.positionCreateMeshButton(); } catch (err) { /* abaikan */ }
   },
 
   resetView(silent = false) {
@@ -21061,6 +24320,14 @@ Modul.extend(CanvasEngine, "canvas-events.js", {
         MeshTransformEngine.showModeButtons(this.visibleCanvas.closest(".editor-canvas-area"));
       } else {
         MeshTransformEngine.hideModeButtons();
+      }
+
+      if (typeof MeshPartEngine !== "undefined") {
+        if (toolId === "mesh-part") {
+          MeshPartEngine.activate(this.visibleCanvas.closest(".editor-canvas-area"));
+        } else {
+          MeshPartEngine.deactivate();
+        }
       }
 
       if (toolId === "ruler") {
@@ -21613,6 +24880,11 @@ Modul.extend(CanvasEngine, "canvas-input-route.js", {
       return;
     }
 
+    if (this.activeTool === "mesh-part") {
+      MeshPartEngine.handlePointerDown(e);
+      return;
+    }
+
   if (this.activeTool === "lasso") {
       LassoEngine.handlePointerDown(e);
       return;
@@ -21685,6 +24957,11 @@ Modul.extend(CanvasEngine, "canvas-input-route.js", {
       return;
     }
 
+    if (this.activeTool === "mesh-part") {
+      MeshPartEngine.handlePointerMove(e);
+      return;
+    }
+
     if (this.activeTool === "lasso") {
       LassoEngine.handlePointerMove(e);
       return;
@@ -21751,6 +25028,11 @@ async handlePointerUp(e) {
 
     if (this.activeTool === "mesh-transform") {
       MeshTransformEngine.handlePointerUp();
+      return;
+    }
+
+    if (this.activeTool === "mesh-part") {
+      MeshPartEngine.handlePointerUp();
       return;
     }
 
@@ -22531,6 +25813,9 @@ const soloLayerId = (this.soloLayerId && project.layers.some(l => l.id === this.
     }
     if (this.activeTool === "mesh-transform") {
       MeshTransformEngine.drawOverlay(this.visibleCtx);
+    }
+    if (this.activeTool === "mesh-part" && typeof MeshPartEngine !== "undefined") {
+      MeshPartEngine.drawOverlay(this.visibleCtx);
     }
   },
 }, "CanvasEngine");
@@ -23729,21 +27014,53 @@ Modul.extend(CanvasEngine, "selection-meshbutton.js", {
     this.removeCreateMeshButton();
     if (!this.selectionRect || this.selectionRect.width < 10 || this.selectionRect.height < 10) return;
 
-   const rect = this.getViewRect();
-    const scaleX = rect.width / this.visibleCanvas.width;
-    const scaleY = rect.height / this.visibleCanvas.height;
-
     const btn = document.createElement("button");
     btn.id = "create-mesh-btn";
     btn.className = "create-mesh-btn";
     btn.innerHTML = LassoEngine._ic("mesh");
     btn.title = "Buat Mesh";
     btn.setAttribute("aria-label", "Buat Mesh");
-    btn.style.left = `${this.selectionRect.x * scaleX}px`;
-    btn.style.top = `${(this.selectionRect.y + this.selectionRect.height) * scaleY + 8}px`;
-
     btn.addEventListener("click", () => this.createMeshAreaFromSelection());
     this.visibleCanvas.parentElement.appendChild(btn);
+    this.positionCreateMeshButton();
+  },
+
+  // Posisi pakai ukuran TAMPILAN kanvas tanpa zoom (offsetWidth), karena tombol ini sudah ikut
+  // di-zoom oleh pembungkus kanvas. Dulu memakai ukuran yang sudah ter-zoom -> zoom terhitung 2x
+  // dan tombolnya lari keluar layar. Ukurannya dijaga tetap dengan skala kebalikan zoom.
+  positionCreateMeshButton() {
+    const btn = document.getElementById("create-mesh-btn");
+    if (!btn || !this.selectionRect) return;
+    const cw = this.visibleCanvas.offsetWidth || this.visibleCanvas.width;
+    const ch = this.visibleCanvas.offsetHeight || this.visibleCanvas.height;
+    const sx = cw / this.visibleCanvas.width;
+    const sy = ch / this.visibleCanvas.height;
+    const z = (typeof ZoomEngine !== "undefined" && (ZoomEngine._vs || ZoomEngine.scale)) || 1;
+    const left = this.selectionRect.x * sx;
+    const top = (this.selectionRect.y + this.selectionRect.height) * sy + 8 / z;
+    btn.style.left = `${left + this.visibleCanvas.offsetLeft}px`;
+    btn.style.top = `${top + this.visibleCanvas.offsetTop}px`;
+    btn.style.transformOrigin = "0 0";
+    btn.style.transform = `scale(${1 / z})`;
+
+    // Kalau zoom-in membuat posisinya keluar layar (mis. seleksi sampai ke tepi bawah),
+    // geser ke dalam area yang kelihatan supaya tombolnya selalu bisa diketuk.
+    if (typeof ZoomEngine !== "undefined" && !ZoomEngine.rotation) {
+      const view = (ZoomEngine.area || document.body).getBoundingClientRect();
+      const vw = Math.min(view.right, window.innerWidth), vh = Math.min(view.bottom, window.innerHeight);
+      const vl = Math.max(view.left, 0), vt = Math.max(view.top, 0);
+      const r = btn.getBoundingClientRect();
+      const M = 8;
+      let dx = 0, dy = 0;
+      if (r.right > vw - M) dx = vw - M - r.right;
+      if (r.left + dx < vl + M) dx = vl + M - r.left;
+      if (r.bottom > vh - M) dy = vh - M - r.bottom;
+      if (r.top + dy < vt + M) dy = vt + M - r.top;
+      if (dx || dy) {
+        btn.style.left = `${left + this.visibleCanvas.offsetLeft + dx / z}px`;
+        btn.style.top = `${top + this.visibleCanvas.offsetTop + dy / z}px`;
+      }
+    }
   },
 
   removeCreateMeshButton() {
@@ -28975,7 +32292,8 @@ Modul.extend(BrushSizeEngine, "brushsize-value.js", {
   isSizeToolActive() {
     return CanvasEngine.activeTool === "brush"
       || CanvasEngine.activeTool === "eraser"
-      || CanvasEngine.activeTool === "smudge";
+      || CanvasEngine.activeTool === "smudge"
+      || CanvasEngine.activeTool === "mesh-part"; // Mesh-: ukuran = kekuatan tarikan
   },
 
   // Diameter titik di dalam tombol Toolbar, diskalakan dari ukuran
@@ -28986,14 +32304,29 @@ Modul.extend(BrushSizeEngine, "brushsize-value.js", {
     return Math.round(this.DOT_MIN_PX + pct * (this.DOT_MAX_PX - this.DOT_MIN_PX));
   },
 
+  // Ukuran khusus Mesh- (terpisah dari Brush). Kecil = area & jarak tarik sempit, besar = lebar & jauh.
+  // Default = 40 (sedang): bagian berubah bentuk, bukan bergeser seluruhnya.
+  getMeshPartSize() {
+    if (typeof CanvasEngine.meshPartSize !== "number") {
+      let s = NaN;
+      try { s = parseFloat(localStorage.getItem("a2d-meshpart-size-v2")); } catch (e) {}
+      CanvasEngine.meshPartSize = isFinite(s) ? Math.min(this.MAX_SIZE, Math.max(this.MIN_SIZE, s)) : 40;
+    }
+    return CanvasEngine.meshPartSize;
+  },
+
   getCurrentSize() {
+    if (CanvasEngine.activeTool === "mesh-part") return this.getMeshPartSize();
     if (CanvasEngine.activeTool === "eraser") return CanvasEngine.eraserSize;
     if (CanvasEngine.activeTool === "smudge") return CanvasEngine.smudgeSize;
     return CanvasEngine.brushSize;
   },
 
   setSize(size) {
-    if (CanvasEngine.activeTool === "eraser") {
+    if (CanvasEngine.activeTool === "mesh-part") {
+      CanvasEngine.meshPartSize = size;
+      try { localStorage.setItem("a2d-meshpart-size-v2", String(size)); } catch (e) {}
+    } else if (CanvasEngine.activeTool === "eraser") {
       CanvasEngine.eraserSize = size;
     } else if (CanvasEngine.activeTool === "smudge") {
       CanvasEngine.smudgeSize = size;

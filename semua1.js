@@ -78,6 +78,7 @@ const HealthCheck = (function () {
     ["MeshPanel", "meshpanel.js", function () { return typeof MeshPanel; }],
     ["MeshTransformEngine", "meshtransform.js", function () { return typeof MeshTransformEngine; }],
     ["MeshTransformPanel", "meshtransformpanel.js", function () { return typeof MeshTransformPanel; }],
+    ["MeshPartEngine", "meshpart.js", function () { return typeof MeshPartEngine; }],
     ["PaintLockEngine", "paintlock.js", function () { return typeof PaintLockEngine; }],
     ["PatternEngine", "pattern.js", function () { return typeof PatternEngine; }],
     ["ProjectBackup", "backup.js", function () { return typeof ProjectBackup; }],
@@ -975,7 +976,11 @@ const UIVisibility = {
     this.renderToggleButton(); // idempotent, aman dipanggil berkali-kali
     EventBus.on("canvas:strokeStart", () => this.setAutoHidden(true));
     EventBus.on("canvas:strokeEnd", () => this.setAutoHidden(false));
-    EventBus.on("canvas:tap", () => this.toggleManual());
+    EventBus.on("canvas:tap", () => {
+      // Mesh-: ketuk di kanvas untuk MEMILIH bagian, bukan untuk sembunyi/munculkan toolbar.
+      if (typeof CanvasEngine !== "undefined" && CanvasEngine.activeTool === "mesh-part") return;
+      this.toggleManual();
+    });
   },
 
   // Dipanggil tiap kali halaman Editor di-render ulang (misal ganti
