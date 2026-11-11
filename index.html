@@ -3,7 +3,9 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-  <title>Animasi 2D Editor</title>
+    <title>DeisPaint</title>
+  <meta name="apple-mobile-web-app-title" content="DeisPaint">
+  <meta name="application-name" content="DeisPaint">
   <meta http-equiv="Content-Security-Policy-Report-Only" content="
     default-src 'self';
     script-src 'self' https://cdn.jsdelivr.net https://unpkg.com;
@@ -18,6 +20,16 @@
     form-action 'none';
     frame-ancestors 'none';
   ">
+    <!-- Layar pembuka: gayanya ditaruh langsung di sini (bukan menunggu puluhan file CSS) supaya langsung tampil begitu halaman terbuka -->
+  <link rel="preload" as="image" href="logo.png">
+  <style>
+    #app-splash{position:fixed;inset:0;z-index:99999;display:flex;flex-direction:column;align-items:center;justify-content:center;background:linear-gradient(135deg,#93c5f8 0%,#dac0ee 50%,#fbb7d2 100%);transition:opacity .5s ease}
+    #app-splash.splash-hidden{opacity:0;pointer-events:none}
+    #app-splash .splash-logo{width:170px;height:170px;object-fit:contain;filter:drop-shadow(0 8px 18px rgba(80,60,120,.18));animation:splash-pop .6s cubic-bezier(.34,1.56,.64,1) both}
+    #app-splash .splash-title{position:absolute;left:0;right:0;bottom:calc(env(safe-area-inset-bottom,0px) + 44px);text-align:center;font-family:'Great Vibes','Dancing Script',cursive;font-size:34px;font-weight:400;letter-spacing:1px;color:rgba(255,255,255,.78);text-shadow:0 1px 8px rgba(80,60,120,.12);opacity:0;animation:splash-fade-up .6s ease .25s both}
+    @keyframes splash-pop{0%{opacity:0;transform:scale(.55)}100%{opacity:1;transform:scale(1)}}
+    @keyframes splash-fade-up{0%{opacity:0;transform:translateY(8px)}100%{opacity:1;transform:translateY(0)}}
+  </style>
   <link rel="manifest" href="manifest.json">
   <meta name="theme-color" content="#4aa3e0">
   <link rel="apple-touch-icon" href="apple-touch-icon.png">
@@ -28,9 +40,12 @@
        otomatis jatuh ke font bawaan browser (Sans Serif/Serif/Monospace tetap jalan). -->
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Caveat:wght@400;700&family=Dancing+Script:wght@400;700&family=Great+Vibes&family=Bungee&family=Fredoka:wght@400;600&family=Permanent+Marker&family=Press+Start+2P&display=swap">
+   <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Caveat:wght@400;700&family=Dancing+Script:wght@400;700&family=Great+Vibes&family=Bungee&family=Fredoka:wght@400;600&family=Permanent+Marker&family=Press+Start+2P&display=swap" media="print" onload="this.media='all'">
+  <noscript><link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Caveat:wght@400;700&family=Dancing+Script:wght@400;700&family=Great+Vibes&family=Bungee&family=Fredoka:wght@400;600&family=Permanent+Marker&family=Press+Start+2P&display=swap"></noscript>
 </head>
 <body>
+
+  <div id="app-splash"><img src="logo.png" alt="deis" class="splash-logo"><div class="splash-title">deis</div></div>
 
   <div id="app">
     <!-- Diisi oleh galeri.js atau editor.js sesuai halaman aktif -->

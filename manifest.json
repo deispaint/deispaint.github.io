@@ -1,11 +1,11 @@
 {
-  "name": "Animasi 2D Editor",
-  "short_name": "deris",
+    "name": "DeisPaint",
+  "short_name": "DeisPaint",
   "description": "Editor animasi 2D di browser",
   "start_url": "./",
   "scope": "./",
   "display": "standalone",
-  "background_color": "#ffffff",
+  "background_color": "#dac0ee",
   "theme_color": "#4aa3e0",
   "icons": [
     {

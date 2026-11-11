@@ -115,6 +115,7 @@ html[data-theme="pink"] {
 
   /* Paling atas dari semuanya */
   --z-fab: 5000;                /* tombol ganti tema & reset zoom */
+  --z-fab-low: 150;             /* tombol melayang kanan bawah (tema, reset zoom, panah UI): DI BELAKANG panel & bar kontrol (>=200) tapi di atas kanvas */
   --z-top: 9999;                /* splash screen & toast/notifikasi global */
 }
 
@@ -5498,7 +5499,7 @@ body.text-color-boost #editor-colorpanel {
   justify-content: center;
   cursor: pointer;
   padding: 0;
-  z-index: var(--z-fab);
+  z-index: var(--z-fab-low);
   filter: drop-shadow(var(--shadow-float));
 }
 
@@ -7375,7 +7376,7 @@ body.sd-open .editor-canvas-floating-actions {
   justify-content: center;
   cursor: pointer;
   padding: 0;
-  z-index: var(--z-fab);
+  z-index: var(--z-fab-low);
   filter: drop-shadow(var(--shadow-float));
   transition: bottom 0.15s ease;
 }
