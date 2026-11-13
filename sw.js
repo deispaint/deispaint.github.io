@@ -10,7 +10,7 @@
   Pemeriksa: node cek-sinkron.js
 */
 const CACHE_PREFIX = "animasi2d-static-";
-const CACHE_VERSION = "v110";
+const CACHE_VERSION = "v113";
 const CACHE_NAME = CACHE_PREFIX + CACHE_VERSION;
 const NETWORK_TIMEOUT_MS = 4000;
 
