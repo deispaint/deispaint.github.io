@@ -41885,7 +41885,7 @@ Modul.extend(Gallery, "galeri-icons.js", {
 }, "Gallery");
 
 /* ======================================================================
-   FILE ASAL: storage.js   (152 baris)   [459/489]
+   FILE ASAL: storage.js   (157 baris)   [459/489]
    ====================================================================== */
 /*
   storage.js
@@ -42030,7 +42030,12 @@ const StorageGuard = {
       location.hostname === "localhost" || location.hostname === "127.0.0.1";
     if (!okOrigin) return;
     window.addEventListener("load", () => {
-      navigator.serviceWorker.register("sw.js").catch((err) => {
+      navigator.serviceWorker.register("sw.js", { updateViaCache: "none" }).then((reg) => {
+        // Cek sw.js baru tiap app dibuka lagi dari latar belakang (PWA jarang reload penuh)
+        document.addEventListener("visibilitychange", () => {
+          if (document.visibilityState === "visible") reg.update().catch(() => {});
+        });
+      }).catch((err) => {
         console.warn("StorageGuard: service worker gagal didaftarkan:", err);
       });
     });

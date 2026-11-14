@@ -2,16 +2,16 @@
   SW.JS -- service worker (Langkah 1 HANDOFF)
   Strategi: NETWORK-FIRST untuk file lokal se-origin. Online -> selalu ambil
   versi terbaru (jadi update gak nyangkut), sekaligus disimpan ke cache.
-  Offline / jaringan lambat (>4 dtk) -> pakai salinan di cache.
+  Cache HANYA dipakai kalau fetch gagal (offline) atau server error 5xx.
+  Jaringan lambat TIDAK lagi menyebabkan file lama dipakai.
   Request lintas-origin (Supabase, CDN, Google Fonts) SENGAJA gak disentuh.
 
   Naikkan CACHE_VERSION kalau daftar PRECACHE berubah (file baru/dihapus).
   Daftar PRECACHE harus cocok dengan <link>/<script> di index.html (gaya.css, kerangka.js, aplikasi.js).
 */
 const CACHE_PREFIX = "animasi2d-static-";
-const CACHE_VERSION = "v113";
+const CACHE_VERSION = "v115";
 const CACHE_NAME = CACHE_PREFIX + CACHE_VERSION;
-const NETWORK_TIMEOUT_MS = 4000;
 
 const PRECACHE = [
   "./",
@@ -48,31 +48,27 @@ self.addEventListener("activate", (event) => {
   })());
 });
 
-function fetchWithTimeout(request, ms) {
-  return new Promise((resolve, reject) => {
-    const timer = setTimeout(() => reject(new Error("timeout")), ms);
-    fetch(request).then(
-      (res) => { clearTimeout(timer); resolve(res); },
-      (err) => { clearTimeout(timer); reject(err); }
-    );
-  });
-}
-
+// NETWORK-FIRST murni: selama jaringan MASIH menjawab, jawaban server yang dipakai
+// (tidak ada timeout -> HP dengan sinyal lambat tidak lagi diberi file lama,
+// jadi semua HP dapat versi yang SAMA). Cache cuma dipakai kalau fetch GAGAL
+// (offline / error jaringan) atau server membalas error 5xx.
 async function networkFirst(request) {
   const cache = await caches.open(CACHE_NAME);
-  const cached = await cache.match(request, { ignoreSearch: true });
   try {
-    // NETWORK-FIRST untuk SEMUA file (dulu file non-halaman langsung dijawab dari cache,
-    // jadi file JS/CSS yang diganti tidak pernah ikut terbarui walau di-refresh).
-    // "no-cache" = selalu tanya server dulu (tidak mau jawaban basi dari cache HTTP browser).
-    const req = request.mode === "navigate" ? request : new Request(request, { cache: "no-cache" });
-    // Timeout cuma dipakai kalau ADA salinan cache buat jatuh balik.
-    const res = cached ? await fetchWithTimeout(req, NETWORK_TIMEOUT_MS) : await fetch(req);
+    // "no-cache" = selalu validasi ke server, jangan percaya cache HTTP browser
+    // (GitHub Pages memberi max-age=600). Berlaku juga untuk index.html (navigasi),
+    // supaya HTML dan JS/CSS-nya selalu sepasang dan terbaru.
+    const req = new Request(request, { cache: "no-cache" });
+    const res = await fetch(req);
+    if (res && res.status >= 500) throw new Error("server " + res.status);
     if (res && res.status === 200 && res.type === "basic") {
       cache.put(request, res.clone()).catch(() => {});
     }
     return res;
   } catch (err) {
+    // Fallback offline: cocokkan persis dulu, baru abaikan query (?v=...)
+    const cached = (await cache.match(request)) ||
+                   (await cache.match(request, { ignoreSearch: true }));
     if (cached) return cached;
     if (request.mode === "navigate") {
       const index = (await cache.match("index.html")) || (await cache.match("./"));
