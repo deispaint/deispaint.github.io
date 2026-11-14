@@ -6,8 +6,7 @@
   Request lintas-origin (Supabase, CDN, Google Fonts) SENGAJA gak disentuh.
 
   Naikkan CACHE_VERSION kalau daftar PRECACHE berubah (file baru/dihapus).
-  Daftar PRECACHE dikelompokkan SAMA dengan index.html (nomor kelompok sama).
-  Pemeriksa: node cek-sinkron.js
+  Daftar PRECACHE harus cocok dengan <link>/<script> di index.html (gaya.css, kerangka.js, aplikasi.js).
 */
 const CACHE_PREFIX = "animasi2d-static-";
 const CACHE_VERSION = "v113";
@@ -17,9 +16,13 @@ const NETWORK_TIMEOUT_MS = 4000;
 const PRECACHE = [
   "./",
   "index.html",
-  "semua.css",
-  "semua1.js",
-  "semua2.js",
+
+  // ===== 3 FILE UTAMA (hasil gabungan; isi & urutannya sama dengan versi 500+ file) =====
+  "gaya.css",
+  "kerangka.js",
+  "aplikasi.js",
+
+  // ===== FILE PENDUKUNG (hanya di sw.js, tidak dimuat lewat index.html) =====
   "manifest.json",
   "icon-192.png",
   "logo.png",
