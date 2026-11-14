@@ -1,0 +1,7557 @@
+/*
+  TOKENS.CSS
+  ----------
+  Variabel desain (design token) buat SEMUA panel: warna, radius,
+  spacing, font. Tinggal pakai var(--nama-token) di file CSS
+  masing-masing, gak perlu tulis angka/kode warna manual berulang.
+
+  TEMA: "Canvas Focus Mode" -- canvas putih polos jadi fokus utama,
+  semua tool jadi FLOATING ICON tanpa kotak/card besar di belakangnya.
+  Ada 2 varian warna aksen yang bisa dipilih pengguna: BIRU (default)
+  dan PINK. Ganti dengan menambahkan attribute data-theme="pink" (atau
+  "blue") di <html> -- lihat thememanager.js.
+*/
+
+:root,
+html[data-theme="blue"] {
+  /* --- Warna latar: canvas putih jadi fokus, TIDAK ada backdrop gelap --- */
+  --bg-app: #ffffff;
+  --bg-canvas-area: #ffffff;
+
+  /* --- Panel "mengambang" (Color, Layer, Mesh, Timeline, dst) saat DIBUKA:
+     efek transparansi ringan cuma buat keterbacaan, bukan card solid --- */
+  --bg-panel: rgba(255, 255, 255, 0.9);
+  --bg-panel-elevated: rgba(255, 255, 255, 0.97);
+  --bg-panel-soft: rgba(255, 255, 255, 0.6);
+  --panel-blur: blur(14px);
+
+  /* --- Border & garis tipis (di atas putih, jadi pakai hitam transparan) --- */
+  --border-subtle: rgba(20, 20, 20, 0.08);
+  --border-strong: rgba(20, 20, 20, 0.16);
+
+  /* --- Teks --- */
+  --text-primary: #202225;
+  --text-secondary: #8a8f98;
+
+  /* --- Warna aksen: BIRU MUDA (tema default) --- */
+  --accent: #4aa3e0;
+  --accent-hover: #6bb8ea;
+  --accent-active-bg: rgba(74, 163, 224, 0.14);
+  --accent-strong: #2f86c9;
+
+  /* --- Warna bahaya (delete, dsb) --- */
+  --danger: #e5484d;
+  --danger-bg: rgba(229, 72, 77, 0.12);
+
+  /* --- Radius (bulat) --- */
+  --radius-sm: 8px;
+  --radius-md: 14px;
+  --radius-lg: 20px;
+  --radius-pill: 999px;
+
+  /* --- Spacing --- */
+  --space-xs: 4px;
+  --space-sm: 8px;
+  --space-md: 16px;
+  --space-lg: 24px;
+
+  /* --- Shadow ringan buat ikon/panel mengambang --- */
+  --shadow-float: 0 2px 10px rgba(20, 20, 20, 0.12);
+  --shadow-panel: 0 8px 28px rgba(20, 20, 20, 0.14);
+
+  /* --- Font --- */
+  --font-base: sans-serif;
+}
+
+/* --- Varian tema PINK: tinggal ganti aksen, sisanya (canvas putih,
+   panel transparan, teks) ikut sama seperti varian biru --- */
+html[data-theme="pink"] {
+  --accent: #ff4f8b;
+  --accent-hover: #ff77a5;
+  --accent-active-bg: rgba(255, 79, 139, 0.14);
+  --accent-strong: #e0356f;
+}
+
+/* --- SKALA Z-INDEX TERPUSAT ---
+   1 "bos" yang nentuin siapa nampil di atas siapa, bukan angka nyebar
+   ditebak-tebak di tiap file CSS (dulu ada 30, 40, 45, 50, 300, 400,
+   500... berulang di banyak file, gampang ketabrak pas nambah fitur
+   baru). Nilainya SENGAJA disamain persis kayak yang lagi jalan
+   sekarang (migrasi bertahap, file lain nyusul belakangan) -- jadi
+   nambah blok ini sendiri TIDAK mengubah tampilan apa pun. Urutan dari
+   paling bawah ke paling atas: */
+:root {
+  /* Di dalam Canvas (backdrop.css, canvas.css) */
+  --z-canvas-backdrop: 0;      /* glow warna di belakang canvas */
+  --z-canvas-content: 1;       /* kanvas gambar itu sendiri */
+  --z-canvas-button: 50;       /* tombol ngambang DI DALAM canvas (mis. buat Mesh) */
+
+  /* Di dalam Timeline (timeline.css) */
+  --z-timeline-zoomed-cel: 30; /* kotak Cel yang lagi di-zoom */
+  --z-timeline-handle: 40;     /* handle trim klip/segmen */
+  --z-timeline-segment-handle: 45; /* handle trim tipe lain */
+  --z-timeline-playhead: 50;   /* garis penunjuk frame sekarang */
+  --z-keyframe-marker: 40;     /* titik keyframe -- harus di atas kotak Cel yg di-zoom */
+
+  /* Di dalam Galeri (gallery.css) & Media trim (media.css) */
+  --z-gallery-badge: 5;
+  --z-media-handle: 5;
+  --z-gallery-dropdown: 20;
+  --z-gallery-bottom-bar: 30;
+
+  /* Panel & kontrol yang ngambang di atas Canvas -- urutan dari bawah
+     ke atas ini yang paling sering "rebutan" sama Toolbar/Timeline: */
+  --z-side-panel: 200;          /* panel Layer/Mesh/Mesh-Transform di kanan */
+  --z-floating-control: 300;    /* bar kontrol ngambang tiap tool (brush, lasso, ruler, dll) */
+  --z-toolbar: 400;             /* Toolbar & panel Timeline (sejajar) */
+  --z-topbar: 500;              /* Top Bar */
+  --z-canvas-fab: 600;          /* tombol Select Canvas / Fullscreen */
+
+  /* Modal & overlay full-screen (export.css, text.css, demoshare.css,
+     colorpanel.css, layer.css, gallery.css, floatingmenu.css, dll) */
+  --z-modal-dim: 900;           /* overlay gelap penuh layar di belakang modal */
+  --z-modal: 1000;              /* kartu modal / menu konteks / popup */
+  --z-overlay: 2000;            /* overlay full-screen prioritas tinggi (color picker, dll) */
+
+  /* Paling atas dari semuanya */
+  --z-fab: 5000;                /* tombol ganti tema & reset zoom */
+  --z-fab-low: 150;             /* tombol melayang kanan bawah (tema, reset zoom, panah UI): DI BELAKANG panel & bar kontrol (>=200) tapi di atas kanvas */
+  --z-top: 9999;                /* splash screen & toast/notifikasi global */
+}
+
+/*
+  GLOBAL.CSS
+  ----------
+  Isi file ini HANYA aturan umum yang dipakai di SEMUA halaman
+  (reset dasar, font, warna latar umum).
+  Jangan taruh style khusus satu fitur di sini -- itu tempatnya di
+  file terpisah (gallery.css, editor.css, dst).
+*/
+
+* {
+  margin: 0;
+  padding: 0;
+  box-sizing: border-box;
+}
+
+body {
+  font-family: var(--font-base, sans-serif);
+  background: var(--bg-app, #ffffff);
+  color: var(--text-primary, #202225);
+}
+
+/*
+  UI-HIDDEN
+  ---------
+  Utility class dipakai UIVisibility (uivisibility.js) buat nyembunyiin
+  elemen (Toolbar, Top Bar, dst) biar Canvas jadi fokus utama. Di sini
+  cuma transisi dasarnya; arah geser (translateX/translateY) diatur per
+  elemen di file CSS masing-masing, karena tiap elemen posisinya beda
+  (Toolbar di kiri, Top Bar di atas, dst).
+*/
+[data-ui-hideable] {
+  transition: transform 0.2s ease, opacity 0.2s ease;
+}
+
+.ui-hidden {
+  opacity: 0;
+  pointer-events: none;
+}
+
+.autosave-failed-toast {
+  position: fixed;
+  top: -60px;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: var(--z-top);
+  background: #d93025;
+  color: #fff;
+  padding: 10px 16px;
+  border-radius: 8px;
+  font-size: 14px;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.25);
+  transition: top 0.25s ease;
+  white-space: nowrap;
+}
+
+.autosave-failed-toast-show {
+  top: 12px;
+}
+
+/*
+  FIX (Bug baru -- tombol Editor nyangkut di Galeri): zoom-reset-btn
+  (zoomreset.js), theme-switch-btn (thememanager.js), &
+  ui-visibility-toggle-btn (uivisibility.js) nempel langsung ke <body>
+  pas app pertama kali dibuka -- jadi dulu selalu tampil di SEMUA
+  halaman, termasuk Galeri, padahal cuma relevan pas di Editor.
+  EditorPage.init() (editor.js) nyalain body.editor-open, Gallery.init()
+  (galeri.js) matiin lagi -- 3 tombol itu default disembunyikan,
+  cuma muncul kalau body punya class ini.
+  !important KHUSUS dipakai di sini karena ui-visibility-toggle-btn
+  nyetel "display: flex" lewat inline style (bukan class) di
+  uivisibility.js -- tanpa !important, inline style itu menang lawan
+  aturan di bawah ini.
+*/
+body:not(.editor-open) #zoom-reset-btn,
+body:not(.editor-open) #theme-switch-btn,
+body:not(.editor-open) #ui-visibility-toggle-btn,
+body:not(.editor-open) #zoom-indicator,
+body:not(.editor-open) #toolbar-bubble-btn,
+body:not(.editor-open) #toolbar-bubble-panel {
+  display: none !important;
+}
+
+/*
+  GALLERY.CSS
+  -----------
+  Hanya untuk tampilan halaman Gallery (galeri.js).
+  Semua class di sini diawali "gallery-" atau id spesifik Gallery
+  supaya tidak tabrakan dengan file CSS fitur lain.
+*/
+
+.gallery-page {
+  padding: 0 0 90px;
+  color: #1a1a1a;
+  background: #fff;
+  min-height: 100%;
+  box-sizing: border-box;
+}
+
+.gallery-header {
+  position: relative;
+  background: linear-gradient(135deg, var(--accent), var(--accent-strong));
+  padding: 22px 20px 20px;
+  border-radius: 0 0 var(--radius-lg) var(--radius-lg);
+  margin-bottom: 16px;
+}
+
+.gallery-settings-btn {
+  position: absolute;
+  top: 20px;
+  right: 16px;
+  width: 34px;
+  height: 34px;
+  border-radius: var(--radius-pill);
+  background: rgba(255, 255, 255, 0.16);
+  border: none;
+  color: #fff;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  flex-shrink: 0;
+}
+
+.gallery-settings-btn:active {
+  background: rgba(255, 255, 255, 0.28);
+}
+
+.gallery-header h1 {
+  font-size: 21px;
+  margin: 0;
+  color: #fff;
+}
+
+.gallery-subtitle {
+  font-size: 13px;
+  opacity: 0.85;
+  margin: 4px 0 0;
+  color: #fff;
+}
+
+/* FITUR BARU: bar header pas mode pilih-banyak aktif (long-press card).
+   Gantiin isi .gallery-header biasa, background/radius/margin-nya
+   dipertahanin (biar gak ada "loncatan" tata letak pas masuk/keluar
+   mode ini), cuma isinya diganti jadi tombol Batal + jumlah dipilih +
+   tombol Hapus. */
+.gallery-header-select {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 14px 16px;
+}
+
+.gallery-select-cancel {
+  background: rgba(255, 255, 255, 0.16);
+  border: none;
+  color: #fff;
+  width: 34px;
+  height: 34px;
+  border-radius: var(--radius-pill);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  flex-shrink: 0;
+}
+
+.gallery-select-count {
+  flex: 1;
+  margin: 0;
+  color: #fff;
+  font-size: 15px;
+  font-weight: 600;
+}
+
+.gallery-select-delete {
+  background: #fff;
+  color: var(--accent-strong);
+  border: none;
+  border-radius: var(--radius-pill);
+  padding: 8px 16px;
+  font-size: 13px;
+  font-weight: 600;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  cursor: pointer;
+  flex-shrink: 0;
+}
+
+.gallery-select-delete:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+.gallery-toolbar {
+  display: flex;
+  gap: 10px;
+  margin: -12px 20px 18px;
+}
+
+.gallery-search {
+  position: relative;
+  flex: 1;
+  display: flex;
+  align-items: center;
+}
+
+.gallery-search-icon {
+  position: absolute;
+  left: 14px;
+  display: flex;
+  opacity: 0.4;
+  pointer-events: none;
+}
+
+.gallery-search input {
+  width: 100%;
+  box-sizing: border-box;
+  padding: 12px 14px 12px 38px;
+  border-radius: var(--radius-pill);
+  border: 1px solid #ececec;
+  background: #fff;
+  font-size: 14px;
+  color: #1a1a1a;
+  box-shadow: var(--shadow-float);
+}
+
+.gallery-search input:focus {
+  outline: none;
+  border-color: var(--accent);
+}
+
+.gallery-sort-wrap {
+  position: relative;
+  display: flex;
+  align-items: center;
+  flex-shrink: 0;
+}
+
+.gallery-sort-select {
+  appearance: none;
+  padding: 12px 30px 12px 16px;
+  border-radius: var(--radius-pill);
+  border: 1px solid #ececec;
+  background: #fff;
+  font-size: 13px;
+  font-weight: 600;
+  color: #1a1a1a;
+  box-shadow: var(--shadow-float);
+  cursor: pointer;
+}
+
+.gallery-sort-chevron {
+  position: absolute;
+  right: 12px;
+  display: flex;
+  opacity: 0.5;
+  pointer-events: none;
+}
+
+.gallery-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
+  gap: 16px;
+  padding: 0 20px;
+}
+
+.gallery-empty,
+.gallery-empty-state {
+  grid-column: 1 / -1;
+  text-align: center;
+  padding: 50px 16px;
+  opacity: 0.55;
+}
+
+.gallery-empty-state svg {
+  margin-bottom: 10px;
+  opacity: 0.5;
+}
+
+.gallery-empty-title {
+  font-size: 15px;
+  font-weight: 600;
+  margin: 0 0 4px;
+  opacity: 1;
+}
+
+.gallery-empty-sub {
+  font-size: 13px;
+  margin: 0;
+}
+
+.gallery-card {
+  background: #fff;
+  border: 1px solid #ececec;
+  border-radius: var(--radius-md);
+  box-shadow: var(--shadow-float);
+  overflow: visible;
+  cursor: pointer;
+  position: relative;
+  transition: box-shadow 0.15s ease, transform 0.1s ease;
+}
+
+.gallery-card-selected {
+  box-shadow: 0 0 0 2px var(--accent), var(--shadow-float);
+}
+
+.gallery-card-selectmode:active {
+  transform: scale(0.98);
+}
+
+.gallery-select-check {
+  position: absolute;
+  top: 8px;
+  left: 8px;
+  width: 22px;
+  height: 22px;
+  border-radius: 50%;
+  border: 2px solid #fff;
+  background: rgba(0, 0, 0, 0.25);
+  z-index: var(--z-gallery-badge);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.3);
+}
+
+.gallery-select-check-on {
+  background: var(--accent);
+  border-color: var(--accent);
+}
+
+.gallery-thumbnail {
+  position: relative;
+  width: 100%;
+  aspect-ratio: 4 / 3;
+  background: #e0e0e0;
+  border-radius: var(--radius-md) var(--radius-md) 0 0;
+  overflow: hidden;
+}
+
+.gallery-thumbnail img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+}
+
+.gallery-thumbnail-empty {
+  width: 100%;
+  height: 100%;
+  background: linear-gradient(135deg, #dfe3e8, #eef1f4);
+}
+
+.gallery-orientation-badge {
+  position: absolute;
+  top: 8px;
+  left: 8px;
+  font-size: 10.5px;
+  font-weight: 700;
+  padding: 3px 8px;
+  border-radius: var(--radius-pill);
+  color: #fff;
+}
+.gallery-card-selectmode .gallery-orientation-badge {
+  left: 38px;
+}
+
+.gallery-badge-c1 { background: #7c5cff; }
+.gallery-badge-c2 { background: #ff4f8b; }
+.gallery-badge-c3 { background: #2fb6c4; }
+.gallery-badge-c4 { background: #ff9a3d; }
+.gallery-badge-c5 { background: #4caf50; }
+.gallery-badge-c6 { background: #4aa3e0; }
+.gallery-time-badge {
+  position: absolute;
+  top: 8px;
+  right: 8px;
+  background: rgba(255, 255, 255, 0.92);
+  color: #333;
+  font-size: 10px;
+  font-weight: 600;
+  padding: 3px 8px;
+  border-radius: var(--radius-pill);
+}
+
+.gallery-duration-badge {
+  position: absolute;
+  bottom: 8px;
+  right: 8px;
+  background: rgba(0, 0, 0, 0.55);
+  color: #fff;
+  font-size: 11px;
+  padding: 2px 7px;
+  border-radius: var(--radius-pill);
+}
+
+.gallery-info {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  padding: 10px 10px 12px;
+  gap: 6px;
+}
+
+.gallery-info-text {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  gap: 2px;
+}
+
+.gallery-name {
+  font-size: 13.5px;
+  font-weight: 600;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.gallery-meta {
+  font-size: 11.5px;
+  opacity: 0.55;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.gallery-add-tile {
+  aspect-ratio: 4 / 5.1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  background: var(--accent-active-bg);
+  border: 1.5px dashed var(--accent);
+  color: var(--accent-strong);
+  font-size: 13px;
+  font-weight: 600;
+  box-shadow: none;
+}
+
+.gallery-add-icon {
+  width: 40px;
+  height: 40px;
+  border-radius: 50%;
+  background: var(--accent);
+  color: #fff;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.gallery-card-menu-wrap {
+  position: relative;
+  flex-shrink: 0;
+}
+
+.gallery-card-menu-btn {
+  background: none;
+  border: none;
+  padding: 4px;
+  cursor: pointer;
+  color: #777;
+  display: flex;
+  border-radius: 6px;
+}
+
+.gallery-card-menu-btn:hover {
+  background: #f0f0f0;
+}
+
+.gallery-card-menu {
+  position: absolute;
+  right: 0;
+  top: calc(100% + 4px);
+  background: #fff;
+  border: 1px solid #e2e2e2;
+  border-radius: 8px;
+  box-shadow: 0 4px 14px rgba(0, 0, 0, 0.12);
+  min-width: 100px;
+  z-index: var(--z-gallery-dropdown);
+  overflow: hidden;
+}
+
+.gallery-card-menu-item {
+  display: block;
+  width: 100%;
+  text-align: left;
+  background: none;
+  border: none;
+  padding: 10px 12px;
+  font-size: 13px;
+  cursor: pointer;
+}
+
+.gallery-card-menu-delete {
+  color: #e05252;
+}
+
+.gallery-card-menu-delete:hover {
+  background: #fdeeee;
+}
+
+.gallery-bottom-nav {
+  position: fixed;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  display: flex;
+background: #fff;
+  border-top: 1px solid #ececec;
+  padding: 6px 0 max(6px, env(safe-area-inset-bottom));
+  z-index: var(--z-gallery-bottom-bar);
+}
+
+.gallery-nav-btn {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 3px;
+  background: none;
+  border: none;
+  padding: 6px 0;
+  font-size: 11px;
+  color: #999;
+  cursor: pointer;
+}
+
+.gallery-nav-btn-active {
+  color: var(--accent-strong);
+}
+
+.modal-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.45);
+display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: var(--z-modal);
+}
+
+.modal-box {
+  background: #fff;
+  border-radius: var(--radius-md);
+  padding: 20px;
+  width: min(90vw, 340px);
+  max-height: 85vh;
+  overflow-y: auto;
+  color: var(--text-primary);
+  box-shadow: var(--shadow-panel);
+}
+
+.modal-box h2 {
+  font-size: 16px;
+  margin-bottom: 16px;
+  color: var(--accent-strong);
+}
+
+.modal-label {
+  display: block;
+  font-size: 12px;
+  color: var(--text-secondary);
+  margin: 12px 0 6px;
+}
+
+.modal-input {
+  width: 100%;
+  padding: 8px 10px;
+  border-radius: 6px;
+  border: 1px solid var(--border-strong);
+  background: #fff;
+  color: var(--text-primary);
+  font-size: 14px;
+  box-sizing: border-box;
+}
+
+.modal-input:focus {
+  outline: none;
+  border-color: var(--accent);
+}
+
+.preset-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+}
+
+.preset-btn {
+  background: #fff;
+  border: 1px solid var(--border-strong);
+  color: var(--text-primary);
+  border-radius: 6px;
+  padding: 10px 8px;
+  font-size: 13px;
+  cursor: pointer;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+}
+
+.preset-btn.preset-selected {
+  border-color: var(--accent);
+  background: var(--accent-active-bg);
+  color: var(--accent-strong);
+}
+
+.preset-size {
+  font-size: 11px;
+  opacity: 0.6;
+}
+
+.custom-size-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 8px;
+}
+
+.modal-input-small {
+  flex: 1;
+  padding: 8px 10px;
+  border-radius: 6px;
+  border: 1px solid var(--border-strong);
+  background: #fff;
+  color: var(--text-primary);
+  font-size: 14px;
+  box-sizing: border-box;
+}
+
+.modal-input-small:focus {
+  outline: none;
+  border-color: var(--accent);
+}
+
+.modal-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 10px;
+  margin-top: 20px;
+}
+
+.modal-btn-secondary {
+  background: none;
+  border: 1px solid var(--border-strong);
+  color: var(--text-secondary);
+  padding: 8px 14px;
+  border-radius: 6px;
+  cursor: pointer;
+}
+
+.modal-btn-primary {
+  background: var(--accent);
+  border: none;
+  color: #fff;
+  padding: 8px 14px;
+  border-radius: 6px;
+  cursor: pointer;
+}
+
+.modal-btn-primary:hover {
+  background: var(--accent-hover);
+}
+.gallery-storage-info {
+  font-size: 12px;
+  opacity: 0.85;
+  margin: 6px 0 0;
+  color: #fff;
+}
+.gallery-storage-info:empty { display: none; }
+.gallery-storage-info-warn { opacity: 1; font-weight: 700; }
+
+.modal-box .gallery-storage-info {
+  color: var(--text-secondary);
+  font-size: 12px;
+  margin: -6px 0 14px;
+}
+.modal-box .gallery-storage-info-warn {
+  color: #c0392b;
+}
+
+.settings-item-btn {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  background: var(--accent-active-bg);
+  border: 1px solid var(--border-strong);
+  color: var(--text-primary);
+  padding: 10px 12px;
+  border-radius: 8px;
+  font-size: 14px;
+  cursor: pointer;
+  box-sizing: border-box;
+}
+
+.settings-item-icon {
+  display: flex;
+  color: var(--accent-strong);
+  flex-shrink: 0;
+}
+
+.settings-theme-row {
+  display: flex;
+  gap: 8px;
+}
+.settings-theme-btn {
+  flex: 1;
+  background: #fff;
+  border: 1px solid var(--border-strong);
+  color: var(--text-primary);
+  border-radius: 6px;
+  padding: 10px 8px;
+  font-size: 13px;
+  cursor: pointer;
+}
+
+.settings-theme-btn-active {
+  border-color: var(--accent);
+  background: var(--accent-active-bg);
+  color: var(--accent-strong);
+  font-weight: 600;
+}
+.settings-swatch-grid {
+  display: grid;
+  grid-template-columns: repeat(6, 1fr);
+  gap: 10px;
+}
+.settings-swatch {
+  aspect-ratio: 1;
+  border-radius: 50%;
+  background: var(--sw);
+  border: 2px solid transparent;
+  box-shadow: 0 0 0 1px var(--border-strong);
+  cursor: pointer;
+  padding: 0;
+}
+.settings-swatch-active {
+  border-color: #fff;
+  box-shadow: 0 0 0 2.5px var(--sw);
+}
+/*
+  SPLASH.CSS
+  ----------
+  Layar pembuka (splash screen) yang muncul PERTAMA KALI web dibuka,
+  sebelum Gallery ditampilkan. Full-screen, background gradient sama
+  kaya di gambar logo, logo muncul dengan animasi "pop" (kaya WhatsApp),
+  terus fade-out halus buat masuk ke Gallery.
+*/
+
+#app-splash {
+  position: fixed;
+  inset: 0;
+  z-index: var(--z-top);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  background: linear-gradient(135deg, #93c5f8 0%, #dac0ee 50%, #fbb7d2 100%);
+  transition: opacity 0.5s ease;
+}
+
+#app-splash.splash-hidden {
+  opacity: 0;
+  pointer-events: none;
+}
+
+.splash-logo {
+  width: 170px;
+  height: 170px;
+  object-fit: contain;
+  filter: drop-shadow(0 8px 18px rgba(80, 60, 120, 0.18));
+  animation: splash-pop 0.6s cubic-bezier(0.34, 1.56, 0.64, 1) both;
+}
+
+.splash-title {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: calc(env(safe-area-inset-bottom, 0px) + 44px);
+  text-align: center;
+  font-family: 'Great Vibes', 'Dancing Script', cursive;
+  font-size: 34px;
+  font-weight: 400;
+  letter-spacing: 1px;
+  color: rgba(255, 255, 255, 0.78);
+  text-shadow: 0 1px 8px rgba(80, 60, 120, 0.12);
+  opacity: 0;
+  animation: splash-fade-up 0.6s ease 0.25s both;
+}
+
+@keyframes splash-pop {
+  0% { opacity: 0; transform: scale(0.55); }
+  100% { opacity: 1; transform: scale(1); }
+}
+
+@keyframes splash-fade-up {
+  0% { opacity: 0; transform: translateY(8px); }
+  100% { opacity: 1; transform: translateY(0); }
+}
+/*
+  EDITOR.CSS
+  ----------
+  Hanya untuk kerangka halaman Editor (editor.js): susunan Top Bar,
+  Toolbar, dan area Canvas. Bukan untuk isi tool atau canvas sesungguhnya.
+
+  CANVAS FOCUS MODE: area canvas putih polos, memenuhi hampir seluruh
+  layar. Top Bar, Toolbar, Timeline diangkat ke position:fixed supaya
+  ngambang DI ATAS Canvas (tidak makan tempat di layout).
+*/
+
+.editor-page {
+  position: relative;
+  height: 100vh;   /* fallback browser lama */
+  height: 100dvh;  /* ikut nyesuain pas address bar muncul/ilang */
+  /* PALING AMAN: svh dihitung dengan ASUMSI address bar/UI browser
+     lagi full nongol -- jadi tinggi canvas gak akan pernah dianggap
+     lebih tinggi dari yang BENERAN kelihatan, walau address bar-nya
+     gak mau nyembunyi (kayak di halaman non-scroll ini). Efeknya
+     canvas gak akan ke-geser ke atas dan ketutupan address bar lagi. */
+  height: 100svh;
+  overflow: hidden;
+  background: var(--bg-canvas-area);
+}
+
+.editor-body {
+  display: flex;
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  /* FIX (canvas ketutup Timeline pas dibuka, minta dibikin kayak CapCut):
+     dulu "inset:0" bikin area ini mentok ke bawah LAYAR, padahal Timeline
+     ngambang fixed DI ATASnya -> canvas ketutup, bukan ngecil. Sekarang
+     batas bawahnya ngikut tinggi ASLI Timeline yang lagi kepake (diukur &
+     disuntik lewat --timeline-live-height, lihat ResizeObserver baru di
+     editor.js), jadi area ini otomatis nyempit pas Timeline kebuka --
+     .editor-canvas-area (flex:1, center) & .editor-canvas-wrapper
+     (max-width/max-height:100%) otomatis ikut ngecil, gak peduli
+     orientasi/rasio canvasnya apa. */
+  bottom: var(--timeline-live-height, 0px);
+  transition: bottom 0.2s ease;
+  overflow: hidden;
+}
+
+#editor-topbar {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  z-index: var(--z-topbar);
+}
+
+#editor-toolbar {
+  position: fixed;
+  top: 76px;
+  bottom: 0;
+  left: 0;
+  z-index: var(--z-toolbar);
+  /* FIX: toolbar kepanjangan (banyak tool baru) dulu cuma "nembus"
+     keluar layar diam-diam -- sekarang bisa digulir vertikal di dalam
+     ruang yang tersedia. -webkit-overflow-scrolling biar scroll-nya
+     tetap mulus di HP (momentum scroll iOS/Android). */
+  overflow-y: auto;
+  -webkit-overflow-scrolling: touch;
+  scrollbar-width: none; /* Firefox: sembunyiin scrollbar, biar tetap rapi "Canvas Focus" */
+}
+
+#editor-toolbar::-webkit-scrollbar {
+  display: none; /* Chrome/Safari: sembunyiin scrollbar juga */
+}
+
+#editor-timeline {
+  position: fixed;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  z-index: var(--z-toolbar);
+}
+
+/* Canvas putih polos memenuhi area kerja -- TANPA background dekoratif
+   atau card besar di belakang canvas. */
+.editor-canvas-area {
+  flex: 1;
+  position: relative;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--bg-canvas-area);
+  overflow: hidden;
+  touch-action: none;
+  transition: box-shadow 0.2s ease;
+}
+
+/* SARAN #3 (kombinasi 2+3): batas bawah canvas dikasih bayangan tipis ke
+   dalam pas Timeline kebuka -- biar area canvas & strip kontrol bawah
+   (brush-bar + Timeline) kebaca sebagai dua "lapisan" yang jelas
+   terpisah, bukan nempel campur aduk kayak sebelumnya. */
+body.timeline-open .editor-canvas-area {
+  box-shadow: inset 0 -10px 14px -12px rgba(0, 0, 0, 0.18);
+}
+
+.editor-canvas-floating-actions {
+  position: fixed;
+  bottom: 16px;
+  right: 16px;
+display: flex;
+  flex-direction: column;
+  gap: 8px;
+  z-index: var(--z-canvas-fab);
+  transition: opacity 0.15s ease;
+}
+
+/* Timeline lagi kebuka -> tombol Select/Fullscreen ngumpet dulu,
+   biar gak nutupin isi Timeline. Class "timeline-open" ditoggle
+   dari timeline.js tiap kali handle drawer di-tap. */
+body.timeline-open .editor-canvas-floating-actions {
+  opacity: 0;
+  pointer-events: none;
+}
+
+/* FIX (tombol panah ganti tema nembus di atas Timeline): z-index-nya
+   sengaja tinggi (5000, lihat uivisibility.js) biar selalu di atas
+   Toolbar/Top Bar -- tapi gak ada yang nyuruh dia ngumpet pas Timeline
+   dibuka, beda dari tombol Select/Fullscreen di atas yang sudah otomatis
+   ngumpet. Disamain aja perlakuannya di sini. */
+body.timeline-open #ui-visibility-toggle-btn {
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 0.15s ease;
+}
+
+.editor-canvas-floating-actions.ui-hidden {
+  opacity: 0;
+  pointer-events: none;
+}
+
+/* Tombol floating polos: tanpa card gelap, cuma ikon warna aksen. */
+.editor-floating-btn {
+  width: 40px;
+  height: 40px;
+  border-radius: var(--radius-lg);
+  background: transparent;
+  border: none;
+  color: var(--accent);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  padding: 0;
+  filter: drop-shadow(var(--shadow-float));
+}
+
+.editor-floating-btn:active {
+  color: var(--accent-hover);
+}
+
+.editor-floating-btn svg {
+  width: 20px;
+  height: 20px;
+}
+
+.editor-canvas-wrapper {
+  position: relative;
+  max-width: 100%;
+  max-height: 100%;
+  /* Default flex item itu gak mau menyusut di bawah ukuran konten
+     aslinya (canvas TikTok yang tinggi banget), walau max-height udah
+     diset 100% -- jadi kelebihannya malah kepotong overflow:hidden
+     bukannya ngecil nyesuain layar. min-width/min-height: 0 ini yang
+     matiin perilaku "gak mau nyusut" itu. */
+  min-width: 0;
+  min-height: 0;
+  background: #ffffff;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.editor-canvas-placeholder {
+  color: var(--text-secondary);
+  font-size: 13px;
+}
+
+/* ===== Layer Panel & Mesh Panel: mengambang di kanan atas, TIDAK
+   mengambil ruang tetap dari Canvas. Muncul lewat ikon Side Panel. ===== */
+
+#editor-historypanel {
+  position: absolute;
+  top: 52px;
+  left: 8px;
+  z-index: var(--z-side-panel);
+  height: 30vh;
+  height: 30dvh;
+  max-height: 30%;
+  width: 200px;
+  border-radius: var(--radius-md);
+  overflow: hidden;
+  box-shadow: var(--shadow-panel);
+}
+
+#editor-layerpanel,
+#editor-meshpanel {
+  position: absolute;
+  top: 84px;
+  right: 8px;
+  z-index: var(--z-side-panel);
+  height: 30vh;
+  height: 30dvh;
+  max-height: 30%;
+  width: 120px;
+  border-radius: var(--radius-md);
+  overflow: hidden;
+  box-shadow: var(--shadow-panel);
+  transition: transform 0.18s ease, opacity 0.18s ease;
+}
+
+/* Layer Panel dilebarin sendiri (Mesh Panel di bawahnya sengaja gak ikut,
+   biar gak kena efek samping ke tampilan lain) -- 120px kerasa sesak
+   buat nama layer + status Timeline + ikon-ikon. */
+#editor-layerpanel {
+  width: 220px;
+}
+
+/* FITUR BARU: tombol expand di header Layer Panel (layer.js) nempelin
+   class ini ke CONTAINER #editor-layerpanel -- bukan ke elemen dalam
+   innerHTML -- jadi berlaku buat SEMUA isi panel ini apa adanya, baik
+   lagi tampilan Layer biasa MAUPUN lagi berubah jadi mode pilih-banyak-
+   layer (checkbox Mesh Transformation / Grup Gerak "move mesh"), karena
+   keduanya sama-sama dirender ke container yang sama ini. Jadi gak perlu
+   kondisi tambahan per-mode -- 1 class ini otomatis kepakai di mana pun
+   panel Layer dipakai. max-height dibatasi biar gak kepotong di HP
+   pendek/landscape (jaga jarak dari top-offset panel, lihat aturan
+   #editor-layerpanel di atas & media query landscape di bawah). */
+#editor-layerpanel.layerpanel-expanded {
+  height: 70vh;
+  height: 70dvh;
+  max-height: calc(100vh - 100px);
+  max-height: calc(100dvh - 100px);
+  width: min(280px, 70vw);
+}
+
+#editor-layerpanel.panel-manual-hidden,
+#editor-meshpanel.panel-manual-hidden,
+#editor-meshtransformpanel.panel-manual-hidden,
+#editor-layerpanel.ui-hidden,
+#editor-meshpanel.ui-hidden,
+#editor-meshtransformpanel.ui-hidden,
+#editor-meshpanel.layerpanel-expanded-hidden,
+#editor-meshtransformpanel.layerpanel-expanded-hidden {
+  transform: translateX(calc(100% + 16px));
+  opacity: 0;
+  pointer-events: none;
+}
+
+#editor-meshpanel {
+  top: calc(84px + 30vh + 12px);
+}
+
+#editor-meshtransformpanel {
+position: absolute;
+  top: calc(84px + 30vh + 12px);
+  right: 8px;
+  z-index: var(--z-side-panel);
+  width: 120px;
+  height: 22vh;
+  height: 22dvh;
+  max-height: 22vh;
+  max-height: 22dvh;
+  border-radius: var(--radius-md);
+  overflow: hidden;
+  box-shadow: var(--shadow-panel);
+  transition: transform 0.18s ease, opacity 0.18s ease;
+}
+/* ===== LANDSCAPE MODE (HP diputer horizontal) =====
+   Hanya nyala kalau tinggi layar PENDEK (max-height: 500px) -- jadi
+   khusus HP landscape, tablet landscape (masih tinggi/lega) TIDAK
+   kena aturan ini sama sekali. Cuma geser/nyesuain posisi & jarak,
+   TIDAK mengubah struktur HTML atau logic JS apa pun -- fitur lain
+   dijamin gak kesenggol.
+   Topbar dipendekin di topbar.css -- baris di bawah ini nyesuain
+   posisi Toolbar & Layer/Mesh Panel biar tetap pas nempel di
+   bawahnya (gak ada celah/numpuk). */
+@media (orientation: landscape) and (max-height: 500px) {
+  #editor-toolbar {
+    top: 52px;
+  }
+
+  #editor-layerpanel,
+  #editor-meshpanel {
+    top: 58px;
+  }
+
+  /* Panel expanded di layar landscape pendek: turunin batas tinggi
+     nyesuain top-offset yang lebih kecil di mode ini (58px), biar gak
+     nongol kepotong di luar layar. */
+  #editor-layerpanel.layerpanel-expanded {
+    max-height: calc(100vh - 70px);
+    max-height: calc(100dvh - 70px);
+  }
+}
+/*
+  TOPBAR.CSS
+  ----------
+  Hanya untuk tampilan Top Bar (topbar.js).
+  CANVAS FOCUS MODE: tanpa pill/card besar -- ikon melayang langsung
+  di atas canvas, warna ikon ikut tema aktif (biru/pink).
+*/
+
+.topbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-sm);
+  padding: 2px var(--space-md) var(--space-sm);
+  margin: 2px var(--space-sm) var(--space-sm);
+  background: transparent;
+  border: none;
+  box-shadow: none;
+}
+
+.topbar-title {
+  font-size: 14px;
+  font-weight: bold;
+  flex: 1;
+  text-align: center;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--text-primary);
+}
+
+.topbar-actions {
+  display: flex;
+  align-items: center;
+  gap: var(--space-sm);
+  /* FIX (ketemu pas nguji beneran di lebar layar HP 390px): jumlah tombol
+     di sini (Undo/Redo + grup Onion/Flip/Import/Export + Panels + More)
+     lebih lebar dari layar HP -- dan flex item defaultnya PUNYA
+     "min-width: auto" (nempel ke lebar konten), bukan 0. Akibatnya baris
+     ini gak bisa ngecil, malah tombol paling kanan (termasuk "Toggle
+     Layer & Mesh Panel") kedorong KELUAR LAYAR, gak kesentuh sama sekali
+     -- padahal itu satu-satunya tombol buat nutup Layer Panel & Mesh
+     Panel bareng, jadi keduanya kelihatan "nempel" terus.
+     min-width:0 + overflow-x:auto = baris ini sekarang beneran bisa
+     di-scroll horizontal kalau kepanjangan, semua tombol tetap kejangkau,
+     TIDAK mengubah urutan/ukuran/fungsi tombol apa pun. */
+  min-width: 0;
+  overflow-x: auto;
+  -webkit-overflow-scrolling: touch;
+  scrollbar-width: none;
+}
+
+.topbar-actions::-webkit-scrollbar {
+  display: none;
+}
+
+.topbar-actions > * {
+  flex-shrink: 0;
+}
+
+/*
+  Wrapper Onion/Import/Export -- ini yang didaftarkan ke UIVisibility
+  (lihat editor.js), jadi cuma grup ini yang bisa disembunyikan.
+  Undo/Redo sengaja di LUAR wrapper ini, selalu kelihatan.
+*/
+.topbar-collapsible {
+  display: flex;
+  align-items: center;
+  gap: var(--space-sm);
+}
+
+.topbar-collapsible.ui-hidden {
+  transform: translateY(-100%);
+}
+
+/*
+  Toggle Top Bar lewat tombol hamburger (topbar-hamburger, di topbar.js).
+  Beda mekanisme sama .ui-hidden (yang dipakai UIVisibility pas nge-draw) --
+  ini toggle manual permanen sampai hamburger di-tap lagi. Dipasang di
+  topbar-back & topbar-collapsible lewat class bersama .topbar-toggle-group.
+  Saat "OFF": ikon-ikon hilang total, bukan disabled -- fungsinya tetap ada.
+*/
+.topbar-toggle-group {
+  transition: opacity 0.15s ease;
+}
+
+.topbar-toggle-group.topbar-collapsed {
+  display: none;
+}
+
+/* Ukuran khusus tombol hamburger, lebih kecil dari topbar-btn biasa */
+#topbar-hamburger {
+  width: 28px;
+  height: 28px;
+}
+
+#topbar-hamburger svg {
+  width: 15px;
+  height: 15px;
+}
+
+.topbar-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: transparent;
+  border: none;
+  color: var(--accent);
+  width: 36px;
+  height: 36px;
+  padding: 0;
+  border-radius: var(--radius-lg);
+  cursor: pointer;
+  transition: color 0.15s ease, transform 0.1s ease;
+  filter: drop-shadow(var(--shadow-float));
+}
+
+.topbar-btn svg {
+  width: 22px;
+  height: 22px;
+}
+
+.topbar-btn:active {
+  transform: scale(0.92);
+}
+
+.topbar-btn:disabled {
+  opacity: 0.35;
+  cursor: not-allowed;
+  filter: none;
+}
+
+.topbar-btn-processing {
+  animation: topbar-btn-pulse 0.8s ease-in-out infinite;
+}
+
+@keyframes topbar-btn-pulse {
+  0%, 100% { opacity: 0.35; }
+  50% { opacity: 0.75; }
+}
+
+.topbar-btn-active {
+  color: var(--accent-strong);
+  position: relative;
+}
+
+.topbar-btn-active::after {
+  content: "";
+  position: absolute;
+  bottom: 1px;
+  left: 50%;
+  transform: translateX(-50%);
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+  background: var(--accent-strong);
+}
+/* ===== LANDSCAPE MODE (HP diputer horizontal): topbar dipendekin dikit
+   biar toolbar & panel di bawahnya (editor.css) bisa naik, ngasih lebih
+   banyak ruang buat kanvas. Cuma nyala kalau layar pendek (HP), tablet
+   landscape gak kesentuh. ===== */
+@media (orientation: landscape) and (max-height: 500px) {
+  .topbar {
+    padding: 2px var(--space-sm) 4px;
+    margin: 2px var(--space-xs) 4px;
+  }
+
+  .topbar-title {
+    font-size: 12px;
+  }
+
+  .topbar-btn {
+    width: 30px;
+    height: 30px;
+  }
+
+  .topbar-btn svg {
+    width: 18px;
+    height: 18px;
+  }
+}
+/*
+  TOOLBAR.CSS
+  -----------
+  Hanya untuk tampilan Toolbar (toolbar.js).
+  CANVAS FOCUS MODE: tidak ada kotak/card besar di belakang ikon --
+  tiap ikon tool melayang sendiri-sendiri langsung di atas canvas.
+*/
+
+#editor-toolbar.ui-hidden {
+  transform: translateX(-100%);
+}
+
+/* Toggle manual lewat tombol titik-tiga di Top Bar (topbar-more, topbar.js).
+   Class terpisah dari .ui-hidden (yang dipakai UIVisibility pas nge-draw)
+   supaya dua sistem ini gak rebutan/nimpa satu sama lain. */
+#editor-toolbar.toolbar-manual-hidden {
+  transform: translateX(-100%);
+}
+
+.toolbar {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-sm);
+  padding: var(--space-md) var(--space-xs);
+  margin: var(--space-sm);
+  background: transparent;
+  border: none;
+  box-shadow: none;
+  width: 52px;
+}
+
+.toolbar-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: transparent;
+  border: none;
+  color: var(--accent);
+  height: 44px;
+  padding: 0;
+  border-radius: var(--radius-lg);
+  cursor: pointer;
+  transition: color 0.15s ease, transform 0.1s ease;
+  filter: drop-shadow(var(--shadow-float));
+}
+
+.toolbar-icon {
+  width: 26px;
+  height: 26px;
+  display: flex;
+}
+
+.toolbar-icon svg {
+  width: 100%;
+  height: 100%;
+}
+
+.toolbar-btn:active {
+  transform: scale(0.92);
+}
+
+/* Tool yang lagi aktif: TIDAK dikasih kotak solid, cukup warna lebih
+   pekat + titik kecil di bawah ikon biar tetap kebaca tanpa card. */
+.toolbar-btn-active {
+  color: var(--accent-strong);
+  position: relative;
+}
+
+.toolbar-btn-active::after {
+  content: "";
+  position: absolute;
+  bottom: 2px;
+  left: 50%;
+  transform: translateX(-50%);
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+  background: var(--accent-strong);
+}
+
+/* ===== Tombol ukuran brush (gaya FlipaClip) -- titik di tengahnya
+   membesar/mengecil ngikutin px yang lagi dipakai. Disembunyikan (bukan
+   dihapus dari DOM) pas tool aktifnya bukan Brush/Eraser/Smudge, biar
+   transisinya halus & posisi tombol lain di bawahnya gak ikut geser. ===== */
+.toolbar-size-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: transparent;
+  border: 1.5px solid var(--accent);
+  color: var(--accent);
+  height: 32px;
+  width: 32px;
+  margin: 0 auto;
+  padding: 0;
+  border-radius: 50%;
+  cursor: pointer;
+  transition: transform 0.1s ease, opacity 0.15s ease;
+}
+
+.toolbar-size-btn:active {
+  transform: scale(0.92);
+}
+
+.toolbar-size-btn-hidden {
+  opacity: 0;
+  pointer-events: none;
+}
+
+.toolbar-size-dot {
+  border-radius: 50%;
+  background: var(--accent);
+  max-width: 22px;
+  max-height: 22px;
+}
+
+/* ===== Tombol "..." (buka laci tool yang disembunyikan) ===== */
+.toolbar-more-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: transparent;
+  border: none;
+  color: var(--accent);
+  height: 36px;
+  padding: 0;
+  border-radius: var(--radius-lg);
+  cursor: pointer;
+  transition: color 0.15s ease, transform 0.1s ease;
+  filter: drop-shadow(var(--shadow-float));
+}
+
+.toolbar-more-btn svg {
+  width: 22px;
+  height: 22px;
+}
+
+.toolbar-more-btn:active {
+  transform: scale(0.92);
+}
+
+/* ===== Laci tool yang disembunyikan -- grid 2 kolom, buka ke SAMPING
+   (bukan manjang ke bawah, biar gak kapiran keluar layar). Elemen
+   terpisah nempel ke <body> (lihat toolbar.js openFlyout), jadi gak
+   kepotong overflow:hidden punya #editor-toolbar yang bisa discroll. ===== */
+.toolbar-flyout {
+  position: fixed;
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: var(--space-xs);
+  background: var(--bg-panel-elevated);
+  backdrop-filter: var(--panel-blur);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-panel);
+  padding: var(--space-xs);
+  z-index: var(--z-toolbar);
+}
+
+.toolbar-flyout .toolbar-btn {
+  filter: none;
+}
+
+/* Pas laci "..." lagi kebuka, Brush/Eraser/Ukuran/Warna disembunyiin
+   dulu (sebelumnya numpuk ketiban laci) -- balik muncul lagi begitu
+   laci ditutup (baik milih tool atau tap di luar). Tombol "..."
+   sendiri TETAP keliatan (gak match selector di bawah, class-nya beda). */
+.toolbar.toolbar-flyout-open > .toolbar-btn,
+.toolbar.toolbar-flyout-open > .toolbar-size-btn,
+.toolbar.toolbar-flyout-open > .toolbar-color-btn {
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 0.15s ease;
+}
+.toolbar-bubble-btn {
+  position: fixed;
+  width: 52px;
+  height: 52px;
+  border-radius: 50%;
+  background: var(--bg-panel-elevated);
+  backdrop-filter: var(--panel-blur);
+  border: 1px solid var(--border-subtle);
+  color: var(--accent);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: grab;
+  padding: 0;
+  box-shadow: var(--shadow-panel);
+  z-index: var(--z-fab);
+  touch-action: none;
+}
+
+.toolbar-bubble-btn:active {
+  cursor: grabbing;
+  transform: scale(0.94);
+}
+
+.toolbar-bubble-btn .toolbar-icon {
+  width: 26px;
+  height: 26px;
+  display: flex;
+}
+
+.toolbar-bubble-btn .toolbar-icon svg {
+  width: 100%;
+  height: 100%;
+}
+
+.toolbar-bubble-panel {
+  position: fixed;
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+  gap: var(--space-sm);
+  padding: var(--space-xs) var(--space-sm);
+  background: var(--bg-panel-elevated);
+  backdrop-filter: var(--panel-blur);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-panel);
+  z-index: var(--z-fab);
+}
+
+.toolbar-bubble-panel .toolbar-btn,
+.toolbar-bubble-panel .toolbar-more-btn {
+  filter: none;
+}
+
+/* ===== LANDSCAPE MODE(HP diputer horizontal): toolbar TETAP di kiri
+   (vertikal, sesuai request), cuma dirapetin dikit -- jarak antar ikon &
+   ukuran ikon sedikit lebih kecil, biar gak makan tinggi layar yang
+   pas landscape emang udah pendek. Cuma nyala kalau layar pendek (HP),
+   tablet landscape gak kesentuh. ===== */
+@media (orientation: landscape) and (max-height: 500px) {
+  .toolbar {
+    gap: 4px;
+    padding: var(--space-sm) 4px;
+    margin: 4px;
+    width: 44px;
+  }
+
+  .toolbar-btn {
+    height: 36px;
+  }
+
+  .toolbar-icon {
+    width: 22px;
+    height: 22px;
+  }
+}
+/*
+  FLOATINGMENU.CSS
+  ----------------
+  Hanya untuk tampilan laci pilihan (floatingMenu.js).
+  Dipakai ulang oleh banyak fitur, jadi gaya di sini dibuat netral
+  ikut tema terang "Canvas Focus Mode".
+*/
+
+.floating-menu {
+  position: fixed;
+  background: var(--bg-panel-elevated);
+  backdrop-filter: var(--panel-blur);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-md);
+  padding: 6px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  z-index: var(--z-overlay);
+  min-width: 140px;
+  box-shadow: var(--shadow-panel);
+}
+
+.floating-menu-item {
+  background: none;
+  border: none;
+  color: var(--text-primary);
+  text-align: left;
+  padding: 8px 10px;
+  border-radius: var(--radius-sm);
+  font-size: 13px;
+  cursor: pointer;
+}
+
+.floating-menu-item:hover {
+  background: var(--border-subtle);
+}
+
+/* ==== VARIAN GRID GAMBAR (submenu Brush) ====
+   Modifier class terpisah, tidak mengubah .floating-menu /
+   .floating-menu-item dasar -- jadi Ruler/Lasso/Shape/dll yang masih
+   pakai daftar teks biasa tetap persis seperti sebelumnya. */
+.floating-menu--grid {
+  width: 240px;
+}
+
+/* FITUR BARU: tab kategori (mis. "Bawaan" | "Custom") -- cuma
+   dirender kalau pemanggil ngasih lebih dari 1 section. */
+.floating-menu-tabs {
+  display: flex;
+  gap: 4px;
+  padding-bottom: 6px;
+  margin-bottom: 4px;
+  border-bottom: 1px solid var(--border-subtle);
+}
+
+.floating-menu-tab {
+  flex: 1;
+  background: none;
+  border: none;
+  padding: 6px 4px;
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--text-secondary);
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+}
+
+.floating-menu-tab--active {
+  background: var(--accent);
+  color: #fff;
+}
+
+/* FITUR BARU: wadah halaman -- default (dipakai Ruler/Lasso/Shape/dll
+   yang cuma 1 halaman) tetap kolom biasa, SAMA PERSIS kayak sebelum
+   ada fitur sections ini. */
+.floating-menu-pages {
+  display: flex;
+  flex-direction: column;
+}
+
+.floating-menu-page {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+/* Khusus varian grid (submenu Brush): halaman jadi baris yang bisa
+   DIGESER ke samping (scroll-snap, 1 section = 1 layar penuh),
+   masing-masing halaman isinya grid gambar yang wrap kayak sebelumnya. */
+.floating-menu--grid .floating-menu-pages {
+  flex-direction: row;
+  overflow-x: auto;
+  scroll-snap-type: x mandatory;
+  -webkit-overflow-scrolling: touch;
+  max-height: 320px;
+}
+
+.floating-menu--grid .floating-menu-page {
+  flex: 0 0 100%;
+  scroll-snap-align: start;
+  flex-direction: row;
+  flex-wrap: wrap;
+  align-content: flex-start;
+  gap: 6px;
+  overflow-y: auto;
+  max-height: 320px;
+}
+
+.floating-menu-item--brush {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: flex-start;
+  gap: 3px;
+  width: 68px;
+  padding: 6px 4px 8px;
+  text-align: center;
+}
+
+.floating-menu-item-preview-img {
+  width: 56px;
+  height: 26px;
+  background: #fff;
+  border: 1px solid var(--border-subtle);
+  border-radius: 4px;
+}
+
+.floating-menu-item--brush .floating-menu-item-label {
+  font-size: 10px;
+  line-height: 1.25;
+  white-space: normal;
+}
+
+/* FITUR BARU: highlight brush yang lagi aktif di grid submenu Brush */
+.floating-menu-item--active {
+  position: relative;
+  background: var(--accent);
+}
+
+.floating-menu-item--active .floating-menu-item-preview-img {
+  border-color: var(--accent);
+  border-width: 2px;
+}
+
+.floating-menu-item--active .floating-menu-item-label {
+  color: #fff;
+  font-weight: 600;
+}
+
+.floating-menu-item-active-badge {
+  position: absolute;
+  top: 2px;
+  right: 6px;
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  background: var(--accent);
+  color: #fff;
+  font-size: 9px;
+  line-height: 14px;
+  text-align: center;
+  border: 1.5px solid #fff;
+}
+
+/* ==== VARIAN IKON (submenu jenis Penggaris) ==== */
+.floating-menu--icons {
+  min-width: 0;
+  padding: 4px;
+  gap: 2px;
+}
+
+.floating-menu-item--icon {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 44px;
+  height: 44px;
+  padding: 0;
+  color: var(--accent);
+  -webkit-tap-highlight-color: transparent;
+}
+
+.floating-menu-item--icon svg {
+  width: 24px;
+  height: 24px;
+}
+
+.floating-menu-item--on {
+  background: var(--accent-active-bg);
+}
+
+/*
+  CANVAS.CSS
+  ----------
+  Hanya untuk tampilan elemen <canvas> menggambar (canvas.js).
+*/
+
+.drawing-canvas {
+  max-width: 100%;
+  max-height: 100%;
+  /* Canvas ini juga flex item (bapaknya, .editor-canvas-wrapper, pakai
+     display:flex) -- jadi kena bug flexbox yang sama kayak wrapper:
+     gak mau nyusut di bawah ukuran piksel aslinya walau max-height udah
+     100%. min-width/min-height: 0 ini yang matiin perilaku itu di
+     level canvas-nya sendiri. */
+  min-width: 0;
+  min-height: 0;
+  background: #ffffff;
+  touch-action: none; /* penting: biar jari/stylus tidak scroll halaman saat menggambar */
+  /* Border transparan by default (ketebalan tetap ada biar gak ada
+     pergeseran layout), baru dikasih warna aksen (lihat rule
+     .canvas-zoomed-out di bawah) pas canvas di-pinch zoom-out --
+     supaya batas tepi canvas kelihatan meski background sekitarnya
+     sama-sama putih. Saat ukuran normal/zoom-in, border disembunyikan. */
+  border: 1px solid transparent;
+  box-sizing: border-box;
+}
+
+/* Wrapper dapat class ini dari zoom.js saat scale < 1 (canvas dikecilin) */
+.editor-canvas-wrapper.canvas-zoomed-out .drawing-canvas {
+  border-color: var(--accent);
+}
+
+.create-mesh-btn {
+  position: absolute;
+  z-index: var(--z-canvas-button);
+  width: 36px;
+  height: 36px;
+  padding: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--accent);
+  color: #ffffff;
+  border: none;
+  border-radius: var(--radius-pill);
+  box-shadow: var(--shadow-float);
+  cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+  touch-action: manipulation;
+}
+
+.create-mesh-btn:active {
+  background: var(--accent-hover);
+}
+/* ===== KERTAS CANVAS: tekstur Cat Air (cuma tampilan editor) ===== */
+html[data-paper="watercolor"] .editor-canvas-wrapper::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  mix-blend-mode: multiply;
+  background-size: 320px 320px;
+  background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='320' height='320'><filter id='p' x='0' y='0' width='100%25' height='100%25'><feTurbulence type='fractalNoise' baseFrequency='0.045 0.05' numOctaves='4' seed='7' stitchTiles='stitch' result='n'/><feDiffuseLighting in='n' surfaceScale='1.6' diffuseConstant='1.05' lighting-color='%23ffffff'><feDistantLight azimuth='225' elevation='58'/></feDiffuseLighting><feColorMatrix type='matrix' values='1 0 0 0 0  1 0 0 0 0  1 0 0 0 0  0 0 0 0 1'/></filter><rect width='100%25' height='100%25' filter='url(%23p)'/></svg>");
+}
+/*
+  BACKDROP.CSS
+  ------------
+  Layar blur di BELAKANG canvas (ala IbisPaint X). Selalu ngisi penuh
+  .editor-canvas-area, biar batas canvas kelihatan jelas walau canvas-nya
+  gak isi penuh layar (ukuran horizontal/media) atau lagi di-pinch kecilin.
+  Isinya cuma "bayangan" blur dari canvas asli -- resolusi sengaja rendah
+  (diset dari backdrop.js) terus di-CSS-scale gede, biar ringan.
+*/
+
+.editor-canvas-backdrop {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  z-index: var(--z-canvas-backdrop);
+  pointer-events: none;
+  /* Gradient aksen tema jadi dasar -- biar tetep enak diliat walau
+     canvas masih kosong/putih. Isi canvas (kalau ada) di-draw DI ATAS
+     gradient ini dengan alpha < 1, jadi nge-blend, bukan nutupin total. */
+  background: radial-gradient(circle at 30% 25%, var(--accent-hover) 0%, var(--accent) 35%, var(--bg-canvas-area) 78%);
+  /* FIX PERFORMA (trik sama kayak di canvas.js): sebelumnya elemen ini
+     blur di UKURAN PENUH LAYAR (inset:0, 100%x100%) -- padahal cuma
+     gradient statis, gak butuh detail tinggi sama sekali. Sekarang
+     elemen fisiknya dikecilin jadi 25% (width/height), baru discale
+     BALIK ke ukuran penuh pakai transform -- browser cuma perlu ngitung
+     blur di area 1/16 dari sebelumnya (25% x 25%), jauh lebih ringan,
+     hasil visualnya sama aja karena blur emang bikin detail ilang. */
+  width: 25%;
+  height: 25%;
+  top: 50%;
+  left: 50%;
+  filter: blur(7px); /* diperkecil sepadan sama downscale-nya (28px / 4) */
+  transform: translate(-50%, -50%) scale(4);
+  opacity: 0.55;
+  transition: opacity 0.2s ease;
+  will-change: transform;
+  contain: layout paint;
+}
+
+/* Canvas asli & tombol2 floating harus di atas backdrop */
+.editor-canvas-wrapper {
+  position: relative;
+  z-index: var(--z-canvas-content);
+}
+.editor-canvas-wrapper {
+  transform-origin: center center;
+  will-change: transform;
+}
+#zoom-indicator {
+  position: fixed;
+  top: 72px;
+  left: 50%;
+  transform: translateX(-50%);
+  background: rgba(30, 30, 30, 0.82);
+  color: #ffffff;
+  font-size: 14px;
+  font-weight: 600;
+  padding: 6px 16px;
+  border-radius: 8px;
+  pointer-events: none;
+  opacity: 0;
+  transition: opacity 0.2s ease;
+  z-index: var(--z-fab);
+}
+
+#zoom-indicator.zoom-indicator-show {
+  opacity: 1;
+}
+/*
+  MESH.CSS
+  --------
+  Hanya untuk tampilan Mesh System (mesh.js): tombol mode Geser/+Titik/-Titik.
+  Titik vertex & garis segitiga digambar langsung di canvas (bukan HTML),
+  jadi tidak butuh CSS terpisah untuk itu.
+*/
+
+.mesh-mode-bar {
+  position: absolute;
+  bottom: 4px;
+  left: 50%;
+  transform: translateX(-50%);
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  background: var(--bg-panel-soft);
+  backdrop-filter: var(--panel-blur);
+  padding: 3px 4px;
+  border-radius: var(--radius-pill);
+  box-shadow: var(--shadow-float);
+  z-index: var(--z-floating-control);
+  max-width: calc(100% - 88px);
+}
+
+.mesh-mode-btn {
+  width: 34px;
+  height: 34px;
+  padding: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: transparent;
+  border: none;
+  color: var(--accent);
+  border-radius: var(--radius-pill);
+  cursor: pointer;
+  flex-shrink: 0;
+  -webkit-tap-highlight-color: transparent;
+  touch-action: manipulation;
+  transition: background 0.15s ease, color 0.15s ease, transform 0.1s ease;
+}
+
+.mesh-mode-btn:active { transform: scale(0.92); }
+
+.mesh-mode-btn-active {
+  background: var(--accent);
+  color: #ffffff;
+}
+
+/* Tombol centang Selesai di bar Mesh */
+.mesh-mode-done {
+  background: var(--accent);
+  color: #ffffff;
+  margin-left: 4px;
+}
+
+/*
+  RULER.CSS
+  ---------
+  Tampilan bar mode Ruler (Straight/Symmetry/Circle), melayang tipis
+  di atas canvas -- efek transparansi ringan cuma buat keterbacaan.
+*/
+
+.ruler-mode-bar {
+  position: absolute;
+  bottom: 4px;
+  left: 50%;
+  transform: translateX(-50%);
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  background: var(--bg-panel-soft);
+  backdrop-filter: var(--panel-blur);
+  padding: 3px 4px;
+  border-radius: var(--radius-pill);
+  box-shadow: var(--shadow-float);
+  z-index: var(--z-floating-control);
+  max-width: calc(100% - 88px);
+}
+
+.ruler-type-label {
+  display: flex;
+  align-items: center;
+  color: var(--accent);
+  font-size: 11px;
+  font-weight: bold;
+  padding: 0 6px 0 8px;
+  white-space: nowrap;
+}
+
+.ruler-mode-btn {
+  width: 34px;
+  height: 34px;
+  padding: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: transparent;
+  border: none;
+  color: var(--accent);
+  border-radius: var(--radius-pill);
+  cursor: pointer;
+  flex-shrink: 0;
+  -webkit-tap-highlight-color: transparent;
+  touch-action: manipulation;
+  transition: background 0.15s ease, transform 0.1s ease;
+}
+
+.ruler-mode-btn:active { transform: scale(0.92); background: var(--accent-active-bg); }
+.ruler-mode-btn-on { background: var(--accent-active-bg); }
+
+.ruler-type-label svg {
+  width: 22px;
+  height: 22px;
+}
+
+/*
+  LAYER.CSS
+  ---------
+  Hanya untuk tampilan Layer Panel (layer.js).
+  LAYOUT (lebar, posisi, flex) TIDAK diubah, cuma tampilan (warna/token)
+  disesuaikan ke tema terang "Canvas Focus Mode".
+*/
+
+.layerpanel {
+  width: 100%;
+  height: 100%;
+  box-sizing: border-box;
+  background: var(--bg-panel);
+  backdrop-filter: var(--panel-blur);
+  border-left: 1px solid var(--border-subtle);
+  display: flex;
+  flex-direction: column;
+  font-family: var(--font-base);
+}
+
+.layerpanel-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: var(--space-sm) var(--space-md);
+  font-size: 12px;
+  color: var(--text-secondary);
+  border-bottom: 1px solid var(--border-subtle);
+}
+
+.layerpanel-header-actions {
+  display: flex;
+  align-items: center;
+  gap: var(--space-xs);
+}
+
+.layerpanel-expand-btn {
+  background: none;
+  border: 1px solid var(--border-subtle);
+  color: var(--text-secondary);
+  width: 22px;
+  height: 22px;
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  font-size: 12px;
+  line-height: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: background 0.12s ease, color 0.12s ease;
+}
+
+.layerpanel-expand-btn:hover {
+  background: var(--border-subtle);
+  color: var(--text-primary);
+}
+
+.layerpanel-add-btn {
+  background: var(--accent);
+  border: none;
+  color: #ffffff;
+  width: 24px;
+  height: 24px;
+  border-radius: var(--radius-pill);
+  cursor: pointer;
+  font-size: 14px;
+  line-height: 1;
+  transition: background 0.15s ease, transform 0.1s ease;
+}
+
+.layerpanel-add-btn:hover {
+  background: var(--accent-hover);
+}
+
+.layerpanel-add-btn:active {
+  transform: scale(0.92);
+}
+
+.layerpanel-list {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+}
+
+.layerpanel-empty {
+  padding: var(--space-lg) var(--space-sm);
+  font-size: 12px;
+  color: var(--text-secondary);
+  opacity: 0.7;
+  text-align: center;
+}
+
+.layer-item {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: var(--space-sm) var(--space-md);
+  border-bottom: 1px solid var(--border-subtle);
+  cursor: pointer;
+  border-radius: var(--radius-sm);
+  transition: background 0.12s ease;
+  touch-action: none;
+}
+
+
+.layer-item-row-top,
+.layer-item-row-bottom {
+  display: flex;
+  align-items: center;
+  gap: var(--space-sm);
+}
+
+.layer-item-row-bottom .layer-reference-btn {
+  margin-left: auto;
+}
+
+.layer-item-active {
+  background: var(--accent-active-bg);
+}
+
+/* Tanda "siap digeser" begitu long-press ke-trigger: item membesar dikit
+   & keangkat (shadow), sebelum user mulai narik jarinya. */
+.layer-item-drag-ready {
+  background: var(--accent-active-bg);
+  box-shadow: var(--shadow-float);
+  transform: scale(1.03);
+  transition: transform 0.12s ease, box-shadow 0.12s ease;
+}
+
+.layerpanel-list-dragging .layer-item:not(.layer-item-drag-ready) {
+  transition: transform 0.12s ease;
+}
+
+.layer-name {
+  flex: 1;
+  min-width: 0;
+  font-size: 12px;
+  color: var(--text-primary);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.layer-clip-indicator {
+  font-size: 11px;
+  opacity: 0.75;
+  flex-shrink: 0;
+}
+
+.layer-animmode-badge {
+  flex-shrink: 0;
+  font-size: 10px;
+  font-weight: 600;
+  padding: 2px 7px;
+  border-radius: 999px;
+  background: var(--bg-panel-soft);
+  color: var(--text-secondary);
+  white-space: nowrap;
+  border: none;
+  cursor: pointer;
+  font-family: inherit;
+}
+
+.layer-visible-btn,
+.layer-lock-btn,
+.layer-reference-btn,
+.layer-delete-btn,
+.layer-more-btn {
+  background: none;
+  border: none;
+  color: var(--text-secondary);
+  font-size: 12px;
+  cursor: pointer;
+  padding: var(--space-xs);
+  border-radius: var(--radius-pill);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: background 0.12s ease, color 0.12s ease;
+}
+
+.layer-visible-btn:hover,
+.layer-lock-btn:hover,
+.layer-reference-btn:hover,
+.layer-more-btn:hover {
+  background: var(--border-subtle);
+  color: var(--text-primary);
+}
+
+.layer-reference-btn-active {
+  background: var(--accent);
+  box-shadow: 0 0 0 1px var(--accent-strong) inset;
+}
+
+.layer-delete-btn {
+  color: var(--danger);
+}
+
+.layer-delete-btn:hover {
+  background: var(--danger-bg);
+}
+
+.layerpanel-multiselect-bar {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-sm);
+  padding: var(--space-sm) var(--space-md);
+  background: var(--bg-panel-elevated);
+  border-bottom: 1px solid var(--border-subtle);
+}
+
+.layerpanel-multiselect-hint {
+  font-size: 11px;
+  color: var(--text-secondary);
+}
+
+.layerpanel-multiselect-createbtn {
+  background: var(--accent);
+  border: none;
+  color: #ffffff;
+  padding: var(--space-sm) var(--space-sm);
+  border-radius: var(--radius-sm);
+  font-size: 11px;
+  cursor: pointer;
+  transition: background 0.15s ease;
+}
+
+.layerpanel-multiselect-createbtn:hover:not(:disabled) {
+  background: var(--accent-hover);
+}
+
+.layerpanel-multiselect-createbtn:disabled {
+  background: var(--bg-panel);
+  border: 1px solid var(--border-subtle);
+  color: var(--text-secondary);
+  cursor: not-allowed;
+}
+
+.layer-multiselect-checkbox {
+  flex-shrink: 0;
+  accent-color: var(--accent);
+}
+
+/* ===== FITUR BARU: Opacity & Blend Mode panel ===== */
+.layer-properties-panel {
+  position: fixed;
+  z-index: var(--z-modal);
+  background: var(--bg-panel-elevated);
+  backdrop-filter: var(--panel-blur);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-sm);
+  padding: var(--space-sm) var(--space-md);
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-sm);
+  min-width: 200px;
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.25);
+}
+
+.layer-properties-row {
+  display: flex;
+  align-items: center;
+  gap: var(--space-sm);
+}
+
+.layer-properties-divider {
+  height: 1px;
+  background: var(--border-subtle);
+  margin: 2px 0;
+}
+
+.layer-properties-label {
+  font-size: 11px;
+  color: var(--text-secondary);
+  width: 46px;
+  flex-shrink: 0;
+}
+
+.layer-opacity-slider {
+  flex: 1;
+  accent-color: var(--accent);
+}
+
+.layer-opacity-value {
+  font-size: 11px;
+  color: var(--text-primary);
+  width: 36px;
+  flex-shrink: 0;
+  text-align: right;
+}
+
+.layer-blendmode-select {
+  flex: 1;
+  background: var(--bg-panel);
+  color: var(--text-primary);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-sm);
+  font-size: 11px;
+  padding: 4px 6px;
+}
+
+.layer-clip-toggle-btn {
+  flex: 1;
+  background: var(--bg-panel);
+  color: var(--text-secondary);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-sm);
+  font-size: 11px;
+  padding: 4px 6px;
+  cursor: pointer;
+  text-align: center;
+  transition: background 0.12s ease, color 0.12s ease, border-color 0.12s ease;
+}
+
+.layer-clip-toggle-active {
+  background: var(--accent);
+  color: #fff;
+  border-color: var(--accent);
+}
+
+.layer-alphalock-toggle-btn {
+  flex: 1;
+  background: var(--bg-panel);
+  color: var(--text-secondary);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-sm);
+  font-size: 11px;
+  padding: 4px 6px;
+  cursor: pointer;
+  text-align: center;
+  transition: background 0.12s ease, color 0.12s ease, border-color 0.12s ease;
+}
+
+.layer-alphalock-toggle-active {
+  background: var(--accent);
+  color: #fff;
+  border-color: var(--accent);
+}
+.layer-registertimeline-btn {
+  color: var(--accent);
+  flex-shrink: 0;
+}
+
+.layer-registertimeline-btn:hover {
+  background: var(--accent-bg, var(--border-subtle));
+  color: var(--accent-strong, var(--accent));
+}
+.layer-thumb {
+  flex-shrink: 0;
+  width: 36px;
+  height: 36px;
+  border-radius: 4px;
+  background: repeating-conic-gradient(#ddd 0% 25%, #eee 0% 50%) 0 0 / 8px 8px;
+  border: 1px solid var(--border-subtle);
+}
+
+
+/* ==== Ikon garis di panel Layer (pengganti emoji, ikut warna tema) ==== */
+.layer-ic {
+  width: 18px;
+  height: 18px;
+  flex: none;
+}
+.layer-clip-indicator .layer-ic {
+  width: 13px;
+  height: 13px;
+}
+.layerpanel-expand-btn .layer-ic {
+  width: 14px;
+  height: 14px;
+}
+.layerpanel-multiselect-createbtn .layer-ic {
+  width: 14px;
+  height: 14px;
+  vertical-align: -2px;
+}
+.layer-visible-btn {
+  color: var(--accent);
+}
+.layer-visible-btn.layer-visible-off {
+  color: var(--text-secondary);
+  opacity: 0.7;
+}
+.layer-lock-btn.layer-lock-on {
+  color: var(--accent);
+}
+.layer-reference-btn-active {
+  color: #fff;
+}
+
+.historypanel {
+  width: 100%;
+  height: 100%;
+  box-sizing: border-box;
+  background: var(--bg-panel-elevated);
+  backdrop-filter: var(--panel-blur);
+  border-left: 1px solid var(--border-subtle);
+  display: flex;
+  flex-direction: column;
+  font-family: var(--font-base);
+}
+
+.historypanel-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: var(--space-sm) var(--space-md);
+  font-size: 12px;
+  color: var(--text-secondary);
+  border-bottom: 1px solid var(--border-subtle);
+}
+
+.historypanel-close-btn {
+  background: none;
+  border: none;
+  color: var(--text-secondary);
+  cursor: pointer;
+  font-size: 12px;
+  padding: var(--space-xs);
+  border-radius: var(--radius-pill);
+}
+
+.historypanel-close-btn:hover {
+  background: var(--border-subtle);
+  color: var(--text-primary);
+}
+
+.historypanel-list {
+  flex: 1;
+  overflow-y: auto;
+  padding: var(--space-xs) 0;
+}
+
+.historypanel-item {
+  width: 100%;
+  box-sizing: border-box;
+  display: flex;
+  align-items: center;
+  gap: var(--space-xs);
+  background: none;
+  border: none;
+  text-align: left;
+  font-family: var(--font-base);
+  font-size: 12px;
+  color: var(--text-secondary);
+  padding: var(--space-xs) var(--space-md);
+  cursor: pointer;
+}
+
+.historypanel-item:hover {
+  background: var(--border-subtle);
+  color: var(--text-primary);
+}
+
+.historypanel-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--border-subtle);
+  flex-shrink: 0;
+}
+
+.historypanel-current {
+  color: var(--text-primary);
+  font-weight: 600;
+  cursor: default;
+}
+
+.historypanel-current .historypanel-dot {
+  background: var(--accent);
+}
+
+.historypanel-current:hover {
+  background: none;
+}
+
+.historypanel-empty {
+  padding: var(--space-md);
+  font-size: 12px;
+  color: var(--text-secondary);
+  text-align: center;
+}
+/*
+  MESHPANEL.CSS
+  -------------
+  Hanya untuk tampilan daftar Mesh Area (meshPanel.js).
+  Warna/radius/spacing sekarang pakai design token dari tokens.css --
+  LAYOUT (lebar, posisi, collapse) TIDAK diubah.
+*/
+
+.meshpanel {
+  width: 100%;
+  height: 100%;
+  box-sizing: border-box;
+  background: var(--bg-panel-elevated);
+  backdrop-filter: var(--panel-blur);
+  border-left: 1px solid var(--border-subtle);
+  display: flex;
+  flex-direction: column;
+  font-family: var(--font-base);
+}
+
+.meshpanel-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: var(--space-sm) var(--space-md);
+  font-size: 12px;
+  color: var(--text-secondary);
+  border-bottom: 1px solid var(--border-subtle);
+}
+
+.meshpanel-collapse-btn {
+  background: none;
+  border: none;
+  color: var(--text-secondary);
+  cursor: pointer;
+  padding: var(--space-xs);
+  border-radius: var(--radius-pill);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: background 0.12s ease, color 0.12s ease;
+}
+
+.meshpanel-collapse-btn:hover {
+  background: var(--border-subtle);
+  color: var(--text-primary);
+}
+
+.meshpanel-collapse-btn svg {
+  width: 16px;
+  height: 16px;
+  transition: transform 0.15s ease;
+}
+
+.meshpanel-collapse-btn.is-collapsed svg {
+  transform: rotate(-90deg);
+}
+
+.meshpanel-collapsed .meshpanel-list {
+  display: none;
+}
+
+.meshpanel-empty {
+  padding: var(--space-lg) var(--space-sm);
+  font-size: 11px;
+  color: var(--text-secondary);
+  opacity: 0.7;
+  text-align: center;
+}
+
+.mesh-item {
+  display: flex;
+  align-items: center;
+  gap: var(--space-sm);
+  padding: var(--space-sm) var(--space-md);
+  border-bottom: 1px solid var(--border-subtle);
+  cursor: pointer;
+  border-radius: var(--radius-sm);
+  transition: background 0.12s ease;
+}
+
+.mesh-item-active {
+  background: var(--accent-active-bg);
+}
+
+.mesh-name {
+  flex: 1;
+  font-size: 12px;
+  color: var(--text-primary);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.mesh-visible-btn,
+.mesh-lock-btn,
+.mesh-delete-btn {
+  background: none;
+  border: none;
+  color: var(--text-secondary);
+  font-size: 12px;
+  cursor: pointer;
+  padding: var(--space-xs);
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: var(--radius-pill);
+  transition: background 0.12s ease, color 0.12s ease;
+}
+
+.mesh-visible-btn:hover,
+.mesh-lock-btn:hover {
+  background: var(--border-subtle);
+  color: var(--text-primary);
+}
+
+.mesh-delete-btn {
+  color: var(--danger);
+}
+
+.mesh-delete-btn:hover {
+  background: var(--danger-bg);
+}
+/*
+  MESHTRANSFORMPANEL.CSS
+  -----------------------
+  Hanya untuk tampilan daftar Mesh Transformation (meshtransformpanel.js).
+  Style dibikin semirip mungkin sama meshpanel.css (Mesh Area) biar
+  konsisten -- sekarang keduanya sama-sama pakai design token dari
+  tokens.css. LAYOUT (lebar, posisi, collapse) TIDAK diubah.
+*/
+
+.meshtransformpanel {
+  width: 100%;
+  height: 100%;
+  box-sizing: border-box;
+  overflow-y: auto;
+  background: var(--bg-panel);
+  backdrop-filter: var(--panel-blur);
+  border-left: 1px solid var(--border-subtle);
+  display: flex;
+  flex-direction: column;
+  font-family: var(--font-base);
+}
+
+.meshtransformpanel-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: var(--space-sm) var(--space-md);
+  font-size: 12px;
+  color: var(--text-secondary);
+  border-bottom: 1px solid var(--border-subtle);
+}
+
+.meshtransformpanel-collapse-btn {
+  background: none;
+  border: none;
+  color: var(--text-secondary);
+  cursor: pointer;
+  padding: var(--space-xs);
+  border-radius: var(--radius-pill);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: background 0.12s ease, color 0.12s ease;
+}
+
+.meshtransformpanel-collapse-btn:hover {
+  background: var(--border-subtle);
+  color: var(--text-primary);
+}
+
+.meshtransformpanel-collapse-btn svg {
+  width: 16px;
+  height: 16px;
+  transition: transform 0.15s ease;
+}
+
+.meshtransformpanel-collapse-btn.is-collapsed svg {
+  transform: rotate(-90deg);
+}
+
+.meshtransformpanel-collapsed .meshtransformpanel-list {
+  display: none;
+}
+
+.meshtransformpanel-empty {
+  padding: var(--space-lg) var(--space-sm);
+  font-size: 11px;
+  color: var(--text-secondary);
+  opacity: 0.7;
+  text-align: center;
+}
+
+.meshtransform-item {
+  padding: var(--space-sm) var(--space-md);
+  border-bottom: 1px solid var(--border-subtle);
+  cursor: pointer;
+  border-radius: var(--radius-sm);
+  transition: background 0.12s ease;
+}
+
+.meshtransform-item-active {
+  background: var(--accent-active-bg);
+}
+
+.meshtransform-item-row {
+  display: flex;
+  align-items: center;
+  gap: var(--space-sm);
+}
+
+.meshtransform-name {
+  flex: 1;
+  font-size: 12px;
+  color: var(--text-primary);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.meshtransform-visible-btn,
+.meshtransform-lock-btn,
+.meshtransform-delete-btn {
+  background: none;
+  border: none;
+  color: var(--text-secondary);
+  font-size: 12px;
+  cursor: pointer;
+  padding: var(--space-xs);
+  border-radius: var(--radius-pill);
+  transition: background 0.12s ease, color 0.12s ease;
+}
+
+.meshtransform-visible-btn:hover,
+.meshtransform-lock-btn:hover {
+  background: var(--border-subtle);
+  color: var(--text-primary);
+}
+
+.meshtransform-delete-btn {
+  color: var(--danger);
+}
+
+.meshtransform-delete-btn:hover {
+  background: var(--danger-bg);
+}
+
+.meshtransform-members {
+  margin-top: 3px;
+  font-size: 10px;
+  color: var(--text-secondary);
+  opacity: 0.8;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+/*
+  MESHPART.CSS
+  ------------
+  Tampilan bar tool Mesh- (meshpart-bar.js). Tombol memakai kelas .mesh-mode-btn dari mesh.css.
+  Garis neon & garis pembatas digambar langsung di canvas (bukan HTML).
+*/
+
+.meshpart-bar {
+  flex-direction: column;
+  align-items: stretch;
+  gap: 2px;
+  padding: 4px 10px;
+  border-radius: 18px;
+  max-width: calc(100% - 24px);
+  width: max-content;
+  min-width: 220px;
+}
+
+.meshpart-row {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+}
+
+.meshpart-hint {
+  flex: 1;
+  min-width: 0;
+  font-size: 11px;
+  line-height: 1.2;
+  color: var(--text-secondary, inherit);
+  text-align: center;
+  padding: 0 4px;
+}
+
+.meshpart-sliders {
+  gap: 10px;
+  padding-bottom: 2px;
+}
+
+.meshpart-slider {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  font-size: 10px;
+  line-height: 1.1;
+  color: var(--text-secondary, inherit);
+}
+
+.meshpart-slider input[type="range"] {
+  width: 100%;
+  margin: 2px 0 0;
+  accent-color: var(--accent);
+  touch-action: manipulation;
+}
+
+/*
+  TIMELINE.CSS
+  ------------
+  Hanya untuk tampilan bar Timeline (timeline.js). Timeline tetap
+  berupa DRAWER (bukan panel permanen): handle kecil di bawah canvas,
+  isi timeline muncul mengambang saat drawer dibuka, tidak menutupi
+  seluruh canvas.
+
+  [Restyle -- tampilan lebih rapi/lega, terinspirasi referensi]
+  Class & struktur HTML TIDAK diubah, cuma nilai visualnya.
+
+  [Resize 90% -- semua ukuran (padding/margin/tinggi/lebar/font)
+  diperkecil ~10% dari versi sebelumnya. Tataletak, fitur, dan cara
+  kerja TIDAK berubah, cuma lebih ringkas makan tempat di layar.]
+*/
+
+.timeline-bar {
+  background: var(--bg-panel-elevated);
+  backdrop-filter: var(--panel-blur);
+  border-top: 1px solid var(--border-subtle);
+  border-radius: var(--radius-lg) var(--radius-lg) 0 0;
+  padding: 11px 13px 10px;
+  box-shadow: 0 -7px 25px rgba(20, 20, 20, 0.08);
+}
+
+.timeline-handle {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  height: 18px;
+  /* FIX (handle keliatan kaya celah putih nyasar): var(--bg-panel-elevated)
+     itu rgba(255,255,255,.97) -- nyaris sama persis sama putihnya kanvas
+     (var(--bg-canvas-area): #ffffff), makanya susah dibedain mana kanvas
+     mana UI Timeline. Diganti var(--accent-active-bg) -- tint warna tema
+     yang lagi aktif (pink/biru), sama kayak yang dipakai buat state aktif
+     di tempat lain -- biar strip ini jelas kebaca "ini Timeline", nyambung
+     sama nuansa panel di bawahnya, bukan ambigu kaya kanvas kosong. */
+  background: var(--accent-active-bg);
+  backdrop-filter: var(--panel-blur);
+  border-top: 1px solid var(--border-subtle);
+  cursor: pointer;
+}
+
+/* Pasangan dari bayangan di .editor-canvas-area (editor.css) -- garis
+   batas atas handle dipertegas dikit pas Timeline kebuka, biar strip
+   kontrol bawah keliatan jelas sebagai panel sendiri. */
+body.timeline-open .timeline-handle {
+  box-shadow: 0 -4px 10px rgba(0, 0, 0, 0.06);
+}
+
+.timeline-handle svg {
+  width: 13px;
+  height: 13px;
+  color: var(--accent);
+  transition: transform 0.2s ease;
+}
+
+#editor-timeline.timeline-collapsed .timeline-bar {
+  display: none;
+}
+
+#editor-timeline.timeline-collapsed .timeline-handle svg {
+  transform: rotate(180deg);
+}
+
+/* ===== Baris kontrol: dua baris (Play/Prev/Next/Loop/Settings lalu
+   Tempel/Zoom/+Keyframe) -- dikasih jarak lega & dipisah pakai garis
+   tipis antar grup biar gak keliatan numpuk. ===== */
+.timeline-controls {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  row-gap: 6px;
+  gap: 5px;
+  margin-bottom: 11px;
+  padding-bottom: 11px;
+  border-bottom: 1px solid var(--border-subtle);
+}
+
+.timeline-controls:last-of-type {
+  margin-bottom: 13px;
+  padding-bottom: 0;
+  border-bottom: none;
+}
+
+.timeline-btn {
+  background: transparent;
+  border: none;
+  color: var(--text-secondary);
+  width: 31px;
+  height: 31px;
+  min-width: 31px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 50%;
+  font-size: 13px;
+  cursor: pointer;
+}
+
+.timeline-btn:hover {
+  background: var(--accent-active-bg);
+  color: var(--accent-strong);
+}
+
+.timeline-btn:active {
+  transform: scale(0.94);
+  background: var(--accent-active-bg);
+}
+
+/* Tombol Play dibedakan -- lingkaran solid warna aksen, sedikit lebih
+   besar, biar jadi fokus utama baris kontrol (kayak referensi). */
+#timeline-play-btn {
+  background: var(--accent);
+  color: #fff;
+  width: 38px;
+  height: 38px;
+  min-width: 38px;
+  font-size: 14px;
+  box-shadow: var(--shadow-float);
+}
+
+#timeline-play-btn:hover {
+  background: var(--accent-hover);
+}
+
+.timeline-btn-accent {
+  background: var(--accent);
+  color: #fff;
+  border: none;
+  border-radius: var(--radius-pill);
+  width: auto;
+  padding: 7px 14px;
+  font-size: 11px;
+  font-weight: 600;
+  margin-left: auto;
+}
+
+.timeline-btn-accent:hover {
+  background: var(--accent-hover);
+}
+
+.timeline-btn:disabled {
+  opacity: 0.35;
+  cursor: not-allowed;
+}
+
+.timeline-btn-active {
+  color: var(--accent-strong);
+  background: var(--accent-active-bg);
+}
+
+.timeline-btn-active::after {
+  display: none;
+}
+.timeline-frame-label {
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--text-secondary);
+  background: var(--bg-panel-soft);
+  padding: 5px 11px;
+  border-radius: var(--radius-pill);
+  min-width: 40px;
+  text-align: center;
+}
+
+/* Tombol "Tempel" dibuat pill abu-abu lembut, senada sama referensi */
+#timeline-paste-btn {
+  width: auto;
+  padding: 7px 13px;
+  border-radius: var(--radius-pill);
+  background: var(--bg-panel-soft);
+  font-size: 11px;
+  font-weight: 500;
+}
+
+/* ===== Wrapper: scroll container horizontal (kaya CapCut) --
+   isinya (.timeline-scroll-content) bisa lebih lebar dari ini pas
+   di-zoom, tinggal digeser/discroll ke samping buat liat bagian lain. */
+.timeline-tracks-wrapper {
+  position: relative;
+  background: var(--bg-panel-soft);
+  border-radius: 0;
+  /* Nembus ke pinggir layar (kayak CapCut) -- margin negatif ini
+     ngelawan padding kiri-kanan .timeline-bar (13px), jadi cuma bagian
+     ruler+klip ini doang yang mepet ujung, tombol kontrol di atasnya
+     tetap ada jarak aman dari tepi layar. */
+  margin: 0 -13px;
+  padding: 4px 0;
+  overflow-x: auto;
+  overflow-y: hidden;
+  -webkit-overflow-scrolling: touch;
+}
+
+/* Konten sebenarnya (ruler + tracks + playhead) -- lebarnya diatur
+   lewat inline style dari timeline.js (ikut zoom & durasi project). */
+.timeline-scroll-content {
+  position: relative;
+}
+
+.timeline-zoom-controls {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  margin-left: 7px;
+  padding-left: 7px;
+  border-left: 1px solid var(--border-subtle);
+}
+
+.timeline-zoom-label {
+  font-size: 10px;
+  color: var(--text-secondary);
+  min-width: 27px;
+  text-align: center;
+}
+
+/* ===== Ruler: skala waktu (nampilin DETIK). margin-left nyamain
+   lebar kolom label track (.timeline-track-label) di bawahnya, biar
+   tanda detik di ruler PAS sejajar sama posisi di track. Lebar kolom
+   label TETAP 58px (harus sama persis dengan LABEL_WIDTH di
+   timeline.js), cuma isi visualnya yang dirapiin. ===== */
+.timeline-ruler {
+  position: relative;
+  height: 23px;
+  margin-left: 58px;
+  margin-bottom: 4px;
+  border-bottom: none;
+  cursor: pointer;
+  touch-action: none;
+}
+
+.timeline-ruler-tick {
+  position: absolute;
+  top: 5px;
+  transform: translateX(-50%);
+  font-size: 9px;
+  font-weight: 500;
+  color: var(--text-secondary);
+  white-space: nowrap;
+}
+
+/* ===== Playhead: garis tegak, motong ruler + semua track ===== */
+.timeline-playhead {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  width: 1.4px;
+  background: var(--accent-strong);
+  z-index: var(--z-timeline-playhead);
+  pointer-events: none;
+  transform: translateX(-1px);
+}
+
+/* Badge angka frame yang nempel di ujung atas playhead */
+.timeline-playhead-badge {
+  position: absolute;
+  top: -1px;
+  left: 50%;
+  transform: translate(-50%, -100%);
+  background: var(--accent-strong);
+  color: #fff;
+  font-size: 9px;
+  font-weight: bold;
+  line-height: 1;
+  padding: 3px 6px;
+  margin-bottom: 4px;
+  border-radius: var(--radius-pill);
+  white-space: nowrap;
+  box-shadow: var(--shadow-float);
+}
+/* Handle geser durasi -- fitur baru, bukan pengganti menu ⚙ */
+.timeline-duration-handle {
+  position: absolute;
+  top: 0;
+  height: 30px;
+  width: 24px;
+margin-left: -12px;
+  cursor: ew-resize;
+  touch-action: none;
+  z-index: var(--z-timeline-handle);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.timeline-duration-handle::after {
+  content: "";
+  width: 4px;
+  height: 100%;
+  border-radius: var(--radius-pill, 999px);
+  background: var(--accent-strong);
+  opacity: 0.55;
+}
+
+/* Handle trim kiri ditaruh di SEBELAH KIRI awal klip (bukan numpuk di
+   atasnya), jadi keyframe di frame 0 tetap bisa diklik. Garisnya nempel
+   di sisi kanan handle, jadi jaraknya ke klip cuma sekitar 15px. */
+.timeline-layer-trim-handle-start {
+  margin-left: -35px;
+  justify-content: flex-end;
+}
+
+.timeline-layer-trim-handle:hover::after,
+.timeline-layer-trim-handle:active::after {
+  opacity: 0.9;
+}
+
+.timeline-front-handle {
+  position: absolute;
+  top: 0;
+  height: 30px;
+  width: 24px;
+  margin-left: -12px;
+  cursor: ew-resize;
+  touch-action: none;
+  z-index: 40;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.timeline-front-handle::after {
+  content: "";
+  width: 4px;
+  height: 100%;
+  border-radius: var(--radius-pill, 999px);
+  background: var(--accent-strong);
+  opacity: 0.55;
+}
+
+.timeline-front-handle:hover::after,
+.timeline-front-handle:active::after {
+  opacity: 0.9;
+}
+
+/* ===== FITUR BARU: Loop Region (in/out point) -- band transparan +
+   2 handle geser, cuma muncul kalau enableLoopRegion aktif (toggle di
+   Pengaturan Project). Pola sama kayak .timeline-duration-handle. ===== */
+.timeline-loop-region {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  background: var(--accent-strong);
+  opacity: 0.12;
+  pointer-events: none;
+  z-index: 25;
+}
+.timeline-loop-handle {
+  position: absolute;
+  top: 0;
+  height: 30px;
+  width: 20px;
+  margin-left: -10px;
+  cursor: ew-resize;
+  touch-action: none;
+  z-index: var(--z-timeline-handle);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.timeline-loop-handle::after {
+  content: "";
+  width: 4px;
+  height: 100%;
+  border-radius: var(--radius-pill, 999px);
+  background: var(--accent-strong);
+  opacity: 0.7;
+}
+
+.timeline-loop-handle:hover::after,
+.timeline-loop-handle:active::after {
+  opacity: 1;
+}
+
+/* ===== FITUR BARU: Marker/Penanda -- bendera kecil di ruler, tap buat
+   menu (Lompat ke Sini/Ganti Nama/Hapus). ===== */
+.timeline-marker-flag {
+  position: absolute;
+  top: -2px;
+  transform: translateX(-2px);
+  font-size: 12px;
+  line-height: 1;
+  cursor: pointer;
+  z-index: var(--z-keyframe-marker);
+  filter: drop-shadow(0 1px 1px rgba(0, 0, 0, 0.35));
+}
+
+/* ===== Daftar track, 1 baris per layer. Tinggi TETAP dari awal
+   (bukan max-height yang nambah ngikutin jumlah layer) -- begitu
+   layer lebih banyak dari yang muat, langsung discroll di dalam
+   kotak ini, gak dorong Timeline jadi makin tinggi.
+   Baris dibikin lebih tinggi + dikasih jarak antar baris biar lega,
+   gak keliatan numpuk kayak sebelumnya. ===== */
+.timeline-tracks {
+  height: 108px;
+  overflow-y: auto;
+  background-color: var(--bg-panel-soft);
+  background-image:
+    linear-gradient(to bottom, var(--bg-panel-soft) 30%, rgba(255, 255, 255, 0)),
+    linear-gradient(to top, var(--bg-panel-soft) 30%, rgba(255, 255, 255, 0)),
+    radial-gradient(farthest-side at 50% 0%, rgba(20, 20, 20, 0.18), rgba(20, 20, 20, 0)),
+    radial-gradient(farthest-side at 50% 100%, rgba(20, 20, 20, 0.18), rgba(20, 20, 20, 0));
+  background-position: top, bottom, top, bottom;
+  background-repeat: no-repeat;
+  background-size: 100% 24px, 100% 24px, 100% 8px, 100% 8px;
+  background-attachment: local, local, scroll, scroll;
+}
+
+.timeline-tracks {
+  transition: height 0.18s ease;
+}
+
+.timeline-tracks-expanded {
+  height: 45vh;
+  height: 45dvh;
+  max-height: calc(100dvh - 280px);
+}
+
+.timeline-track-row {
+  display: flex;
+  align-items: center;
+  height: 46px;
+  margin-bottom: 4px;
+  border-bottom: none;
+  border-radius: var(--radius-sm);
+}
+
+.timeline-track-row-active {
+  background: var(--accent-active-bg);
+  border-left: none;
+}
+
+.timeline-track-label {
+  width: 58px;
+  flex-shrink: 0;
+  font-size: 11px;
+  font-weight: 500;
+  color: var(--text-primary);
+  padding: 0 5px 0 9px;
+  border-left: 3px solid var(--layer-color, var(--accent));
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.timeline-track-groupmark {
+  font-size: 9px;
+  margin-right: 2px;
+}
+
+.timeline-track-lane {
+  flex: 1;
+  position: relative;
+  height: 100%;
+  background: rgba(255, 255, 255, 0.5);
+  border-radius: var(--radius-sm);
+  margin-right: 4px;
+}
+
+/* ===== Clip/blok visibilitas (dari Visibility Keyframe) ===== */
+.timeline-clip {
+  position: absolute;
+  top: 6px;
+  bottom: 6px;
+  border-radius: 4px;
+}
+
+.timeline-clip-visible {
+  background: rgba(0, 0, 0, 0.06);
+  /* FIX (touch-action gak konsisten di semua device/WebView): scroll
+     vertikal & drag horizontal SEKARANG dua-duanya di-handle manual
+     lewat JS (lihat listener pointerdown clip di timeline.js), jadi
+     "none" di sini justru bener -- browser gak usah ikut campur/rebutan
+     sama gesture yang udah di-handle sendiri. */
+  touch-action: none;
+}
+
+.timeline-clip-hidden {
+  background: rgba(20, 20, 20, 0.05);
+  /* Segmen hidden gak ada drag/tap khusus, jadi bebas dua arah aja. */
+  touch-action: pan-x pan-y;
+}
+/* ===== FASE 4: kotak-kotak segmen buat Layer Cel ===== */
+.timeline-cel-block {
+  position: absolute;
+  top: 4px;
+  bottom: 4px;
+  border-radius: 5px;
+  background: var(--layer-color, var(--accent-strong));
+  opacity: 0.55;
+  border-right: 2px solid var(--bg-panel-elevated);
+  box-sizing: border-box;
+  /* Scroll waktu ke samping tetep native (pan-x), tapi vertikal (pan-y)
+     dicabut -- itu sekarang di-handle manual lewat JS biar gak dobel/
+     bentrok sama scroll bawaan yang gak konsisten (lihat timeline.js). */
+  touch-action: pan-x;
+}
+
+.timeline-cel-block-empty {
+  background: repeating-linear-gradient(
+    45deg,
+    rgba(0, 0, 0, 0.06),
+    rgba(0, 0, 0, 0.06) 4px,
+    rgba(0, 0, 0, 0.02) 4px,
+    rgba(0, 0, 0, 0.02) 8px
+  );
+  opacity: 1;
+}
+
+.timeline-cel-block-dot {
+  position: absolute;
+  top: 4px;
+  left: 4px;
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--bg-panel-elevated);
+  box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.15);
+}
+
+.timeline-cel-block-empty .timeline-cel-block-dot {
+  display: none;
+}
+
+/* FITUR BARU (murni tampilan): label angka "ketahan berapa frame" di
+   pojok kanan-bawah kotak Cel. */
+.timeline-cel-block-hold {
+  position: absolute;
+  bottom: 2px;
+  right: 3px;
+  font-size: 8px;
+  font-weight: 600;
+  line-height: 1;
+  color: #fff;
+  background: rgba(0, 0, 0, 0.45);
+  padding: 1px 3px;
+  border-radius: 3px;
+  pointer-events: none;
+  white-space: nowrap;
+}
+
+.timeline-layer-trim-handle {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  width: 20px;
+ margin-left: -10px;
+  cursor: ew-resize;
+  touch-action: none;
+  z-index: var(--z-timeline-segment-handle);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.timeline-layer-trim-handle::after {
+  content: "";
+  width: 3px;
+  height: 70%;
+  border-radius: var(--radius-pill, 999px);
+  background: var(--accent-strong);
+  opacity: 0.7;
+}
+
+.timeline-layer-trim-handle:hover::after,
+.timeline-layer-trim-handle:active::after {
+  opacity: 1;
+}
+
+/* ===== Titik keyframe (posisi/opacity) -- bisa di-tap (menu) atau
+   digeser (pindah frame). Dibikin lebih besar & dikasih cincin putih
+   di sekelilingnya biar keliatan jelas di atas lane. ===== */
+.timeline-keyframe-marker {
+  position: absolute;
+  top: 50%;
+  width: 30px;
+  height: 30px;
+transform: translate(-50%, -50%);
+  cursor: grab;
+  z-index: var(--z-keyframe-marker);
+  touch-action: none;
+}
+/* FIX (titik keyframe ketutup kotak cel pas di-zoom): kotak cel yang
+   di-zoom transform:scale(2.2) + z-index:30 (lihat .timeline-cel-block-zoomed
+   di bawah), makanya titik keyframe dinaikin z-index-nya (di atas) biar gak
+   ketiban. Titik yang emang kepunyaan blok yang lagi di-zoom (lihat class
+   ini yang ditambah dari timeline.js toggleCelBlockZoom) dibesarin dikit
+   juga biar makin gampang di-tap/digeser. */
+.timeline-keyframe-marker-zoomed {
+  transform: translate(-50%, -50%) scale(1.6);
+}
+
+.timeline-keyframe-marker-hidden {
+  visibility: hidden;
+  pointer-events: none;
+}
+
+.timeline-keyframe-marker::after {
+  content: "";
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  width: 10px;
+  height: 10px;
+  background: var(--layer-color, var(--accent-strong));
+  border-radius: 2px;
+  box-shadow: 0 0 0 3px var(--bg-panel-elevated);
+  transform: translate(-50%, -50%) rotate(45deg);
+  pointer-events: none;
+}
+
+.timeline-keyframe-menu {
+  position: fixed;
+  z-index: var(--z-modal);
+  background: var(--bg-panel-elevated);
+  backdrop-filter: var(--panel-blur);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-md);
+  padding: 7px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  box-shadow: var(--shadow-panel);
+  min-width: 135px;
+}
+
+.timeline-keyframe-menu-title {
+  font-size: 10px;
+  font-weight: 600;
+  color: var(--text-secondary);
+  padding: 2px 7px 5px;
+}
+
+.timeline-keyframe-menu button {
+  background: var(--bg-panel-soft);
+  border: none;
+  color: var(--text-primary);
+  padding: 8px 11px;
+  border-radius: var(--radius-sm);
+  font-size: 12px;
+  text-align: left;
+  cursor: pointer;
+}
+
+.timeline-keyframe-menu button:hover {
+  background: var(--accent-active-bg);
+}
+
+.timeline-keyframe-menu button:active {
+  background: var(--accent);
+  color: #ffffff;
+}
+
+.timeline-keyframe-menu-danger {
+  color: var(--danger);
+}
+/* ===== LANDSCAPE MODE (HP diputer horizontal): Timeline pas KEBUKA
+   dipadetin lagi (padding/tinggi baris layer/ruler dikecilin) -- biar
+   walau lagi dibuka gak abisin banyak tinggi layar yang di landscape
+   emang udah pendek, jadi kanvas gambar tetap keliatan lega. Struktur,
+   fitur, dan cara kerja Timeline TIDAK berubah, cuma ukurannya makin
+   ringkas. Cuma nyala kalau layar pendek (HP), tablet landscape gak
+   kesentuh. ===== */
+@media (orientation: landscape) and (max-height: 500px) {
+  .timeline-bar {
+    padding: 6px 10px 6px;
+  }
+
+  .timeline-controls {
+    margin-bottom: 6px;
+    padding-bottom: 6px;
+  }
+
+  .timeline-controls:last-of-type {
+    margin-bottom: 6px;
+  }
+
+  .timeline-btn {
+    width: 26px;
+    height: 26px;
+    min-width: 26px;
+  }
+
+  #timeline-play-btn {
+    width: 30px;
+    height: 30px;
+    min-width: 30px;
+  }
+
+  .timeline-ruler {
+    height: 18px;
+    margin-bottom: 3px;
+  }
+
+  .timeline-tracks {
+    height: 56px;
+  }
+
+  .timeline-tracks-expanded {
+    height: 30vh;
+    height: 30dvh;
+    max-height: calc(100dvh - 140px);
+  }
+
+  .timeline-track-row {
+    height: 26px;
+    margin-bottom: 3px; 
+  }
+}
+/* Highlight pas klip (video/audio) lagi BENERAN digeser/di-drag.
+   Klip yang belum pernah kepilih tetap wajib tahan dulu sebelum masuk
+   mode ini; klip yang udah pernah kepilih langsung masuk mode ini
+   begitu jari gerak dikit (lihat timeline.js). Warna ikut var(--accent-*)
+   supaya nyambung ke tema biru/pink yang lagi aktif. */
+.timeline-clip-dragging {
+  outline: 2px solid var(--accent-strong);
+  outline-offset: -2px;
+  background: var(--accent-active-bg) !important;
+}
+/* ===== Galeri Cel (mode fokus tap-2x) ===== */
+.timeline-cel-gallery-box {
+  width: min(92vw, 380px);
+}
+
+.timeline-cel-gallery-grid {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 10px;
+  margin-top: 4px;
+}
+
+.timeline-cel-gallery-item {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+  background: var(--bg-panel-soft);
+  border: 1.5px solid var(--border-subtle);
+  border-radius: var(--radius-md);
+  padding: 6px;
+  cursor: pointer;
+}
+
+.timeline-cel-gallery-item:active {
+  transform: scale(0.96);
+}
+
+.timeline-cel-gallery-item-current {
+  border-color: var(--accent-strong);
+  background: var(--accent-active-bg);
+}
+
+.timeline-cel-gallery-thumb {
+  width: 100%;
+  aspect-ratio: 1 / 1;
+  border-radius: 6px;
+  background-color: #fff;
+  background-size: contain;
+  background-repeat: no-repeat;
+  background-position: center;
+  border: 1px solid var(--border-subtle);
+}
+
+.timeline-cel-gallery-label {
+  font-size: 10px;
+  font-weight: 600;
+  color: var(--text-secondary);
+}
+
+.timeline-cel-gallery-use {
+  font-size: 10px;
+  font-weight: 600;
+  color: var(--accent-strong);
+  background: var(--accent-active-bg);
+  border-radius: var(--radius-pill, 999px);
+  padding: 4px 8px;
+  white-space: nowrap;
+}
+.timeline-cel-block-zoomed {
+  transform: scale(2.2);
+  transform-origin: left center;
+  z-index: var(--z-timeline-zoomed-cel);
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.28);
+  filter: none !important;
+}
+
+.timeline-cel-block-dimmed {
+  filter: blur(2px);
+  transition: filter 0.15s;
+}
+
+.timeline-tracks-wrapper-zoom-active {
+  overflow-y: visible !important;
+}
+
+.timeline-tracks-wrapper,
+.timeline-ruler,
+.timeline-cel-block {
+  -webkit-user-select: none;
+  user-select: none;
+  -webkit-touch-callout: none;
+}
+
+.timeline-tracks-wrapper-zoom-active .timeline-playhead {
+  visibility: hidden;
+}
+.timeline-tracks-zoom-active .timeline-layer-trim-handle,
+.timeline-tracks-wrapper-zoom-active .timeline-duration-handle,
+.timeline-tracks-wrapper-zoom-active .timeline-front-handle {
+  visibility: hidden;
+  pointer-events: none;
+}
+.timeline-zoom-playhead {
+  position: absolute;
+  top: -6px;
+  bottom: -6px;
+  width: 1.4px;
+  margin-left: -0.7px;
+  background: var(--accent-strong);
+  border-radius: 1px;
+  z-index: 2;
+  pointer-events: auto;
+  touch-action: none;
+  cursor: ew-resize;
+}
+.timeline-zoom-playhead::before {
+  content: "";
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: 50%;
+  width: 18px;
+  transform: translateX(-50%);
+}
+.timeline-zoom-playhead-badge {
+  position: absolute;
+  top: -1px;
+  left: 50%;
+  transform: translate(-50%, -100%) scale(0.45);
+  transform-origin: 50% 100%;
+  background: var(--accent-strong);
+  color: #fff;
+  font-size: 9px;
+  font-weight: bold;
+  line-height: 1;
+  padding: 3px 6px;
+  margin-bottom: 4px;
+  border-radius: var(--radius-pill);
+  white-space: nowrap;
+  box-shadow: var(--shadow-float);
+  pointer-events: none;
+}
+
+.timeline-tracks-zoom-active {
+  overflow-y: visible !important;
+  /* FIX (playhead keputus di baris bawah pas Cel di-zoom/tahan-lama):
+     .timeline-tracks tingginya di-tetapin 80px (lihat aturan aslinya) --
+     overflow-y:visible di atas cuma bikin isinya KELIHATAN tumpah ke
+     bawah tanpa keclip, tapi tinggi KOTAKNYA sendiri tetap kehitung
+     80px. Playhead (garis vertikal biru) ngikutin tinggi kotak itu buat
+     nentuin sampai mana dia manjang ke bawah -- jadi kalau kotaknya
+     gak ikut nambah tinggi, playhead-nya keputus sebelum nyampe baris
+     paling bawah. height:auto di sini bikin kotaknya beneran nambah
+     tinggi ngikutin isi aslinya, playhead pun ikut manjang penuh.
+   */
+  height: auto !important;
+}
+/* Toast kecil pengganti alert() bawaan browser -- lihat
+   TimelineEngine.showToast() di timeline.js */
+.timeline-toast {
+  position: fixed;
+  left: 50%;
+  bottom: 90px;
+  transform: translate(-50%, 12px);
+  max-width: 80vw;
+  background: var(--bg-panel-elevated, #222);
+  color: var(--text-primary, #fff);
+  font-size: 12px;
+  font-weight: 500;
+padding: 10px 16px;
+  border-radius: var(--radius-pill, 999px);
+  box-shadow: var(--shadow-panel);
+  z-index: var(--z-overlay);
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 0.18s ease, transform 0.18s ease;
+  text-align: center;
+}
+
+.timeline-toast-show {
+  opacity: 1;
+  transform: translate(-50%, 0);
+}
+/*
+  MEDIA.CSS -- FILE BARU
+  ----------------------
+  Cuma buat tampilan baris "Audio Track" di Timeline (clip ungu + tombol
+  hapus). Menu Import (Gambar/Audio) pakai FloatingMenu yang sudah ada,
+  jadi gak butuh CSS terpisah buat itu.
+*/
+
+.timeline-audio-row {
+  background: transparent;
+  height: 36px;
+  margin-bottom: 4px;
+}
+
+.timeline-audio-clip {
+  position: absolute;
+  top: 5px;
+  bottom: 5px;
+  background: var(--accent-strong, rgba(47, 134, 201, 0.85));
+  border-radius: var(--radius-sm, 8px);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  overflow: hidden;
+  touch-action: none;
+  cursor: grab;
+  padding: 0 6px;
+  touch-action: none;
+}
+
+/* Kanvas gelombang suara -- background layer, gambar/isinya diatur
+   dari JS (paintWaveform, timeline.js). pointer-events:none biar gak
+   ganggu drag/tap yang nempel di .timeline-audio-clip di atasnya. */
+.timeline-audio-waveform {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  pointer-events: none;
+}
+
+.timeline-audio-clip-name {
+  font-size: 10px;
+  color: #fff;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.timeline-audio-delete-btn {
+  background: none;
+  border: none;
+  color: #fff;
+  font-size: 11px;
+  cursor: pointer;
+  flex-shrink: 0;
+  padding: 0 2px;
+}
+.timeline-audio-segment-modified {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  background: rgba(33, 150, 243, 0.85);
+  pointer-events: none;
+}
+
+/* ===== Pegangan potong (trim) kiri/kanan -- geser buat motong ujung
+   klip yang UDAH nempel di Timeline, non-destruktif (kaya voice note
+   WhatsApp / CapCut). Nempel pas di tepi klip, area sentuh dilebihin
+   dikit dari lebar visualnya biar gampang ditarik pakai jari. ===== */
+.timeline-audio-trim-handle {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  width: 14px;
+  cursor: ew-resize;
+  touch-action: none;
+  z-index: var(--z-media-handle);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.timeline-audio-trim-handle::after {
+  content: "";
+  width: 3px;
+  height: 60%;
+  border-radius: var(--radius-pill, 999px);
+  background: rgba(255, 255, 255, 0.9);
+}
+
+.timeline-audio-trim-handle-left {
+  left: 0;
+  border-radius: var(--radius-sm, 8px) 0 0 var(--radius-sm, 8px);
+}
+
+.timeline-audio-trim-handle-right {
+  right: 0;
+  border-radius: 0 var(--radius-sm, 8px) var(--radius-sm, 8px) 0;
+}
+
+.timeline-audio-trim-handle:hover,
+.timeline-audio-trim-handle:active {
+  background: rgba(0, 0, 0, 0.18);
+}
+
+/* ===== Modal "Kecepatan Audio" (openSpeedEditor, media.js) ===== */
+.speed-modal-box {
+  width: min(92vw, 380px);
+}
+
+.audio-volume-row {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-top: 12px;
+}
+
+.audio-volume-label {
+  font-size: 12px;
+  display: flex;
+  justify-content: space-between;
+}
+
+#audio-volume-range {
+  width: 100%;
+  accent-color: var(--accent-strong);
+}
+
+.audio-mute-label {
+  font-size: 12px;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.audio-fade-row {
+  display: flex;
+  gap: 8px;
+  margin-top: 4px;
+}
+
+.audio-fade-label {
+  flex: 1;
+  font-size: 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.timeline-audio-clip-muted {
+  opacity: 0.55;
+}
+
+.modal-hint {
+  font-size: 11px;
+  opacity: 0.6;
+  margin: 4px 0 0;
+}
+
+.speed-rows-header {
+  display: grid;
+  grid-template-columns: 1fr 1fr 1fr 22px;
+  gap: 6px;
+  margin-top: 14px;
+  font-size: 11px;
+  opacity: 0.6;
+}
+
+#speed-rows {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-top: 4px;
+}
+
+.speed-row {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 6px;
+  border-radius: 6px;
+  background: rgba(255, 255, 255, 0.03);
+}
+
+.speed-row-inputs {
+  display: grid;
+  grid-template-columns: 1fr 1fr 1fr 22px;
+  gap: 6px;
+  align-items: center;
+}
+
+.speed-row-inputs .modal-input-small {
+  width: 100%;
+  box-sizing: border-box;
+}
+
+.speed-row-remove {
+  background: none;
+  border: none;
+  color: #e57373;
+  font-size: 16px;
+  line-height: 1;
+  cursor: pointer;
+  padding: 4px;
+}
+
+.speed-row-setters {
+  display: flex;
+  gap: 6px;
+}
+
+.speed-set-btn {
+  flex: 1;
+  font-size: 10px;
+  padding: 5px 4px;
+  border-radius: 6px;
+  border: 1px solid #444;
+  background: #1e1e1e;
+  color: #cfcfcf;
+  cursor: pointer;
+}
+
+.speed-set-btn:active {
+  background: #2c3e50;
+  color: #fff;
+}
+
+.speed-add-btn {
+  margin-top: 8px;
+  width: 100%;
+}
+
+/* ===== Player preview (createAudioPreview, dipakai di Potong Audio &
+   Kecepatan Audio) ===== */
+.audio-preview {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 10px 0 4px;
+  padding: 8px;
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.04);
+}
+
+.audio-preview-play {
+  flex-shrink: 0;
+  width: 30px;
+  height: 30px;
+  border-radius: 50%;
+  border: none;
+  background: #4a90d9;
+  color: #fff;
+  font-size: 12px;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.audio-preview-scrubber {
+  flex: 1;
+  min-width: 0;
+}
+
+.audio-preview-time {
+  flex-shrink: 0;
+  font-size: 10px;
+  opacity: 0.7;
+  white-space: nowrap;
+}
+
+/* ===== Baris "Potong dari/sampai" + tombol Set (openTrimEditor) ===== */
+.trim-field-row {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+}
+
+.trim-field-row .modal-input {
+  flex: 1;
+}
+
+.trim-set-btn {
+  flex-shrink: 0;
+  white-space: nowrap;
+  font-size: 11px;
+  padding: 8px 10px;
+}
+/*
+  IMAGE-PLACE.CSS
+  ---------------
+  Cuma buat tampilan tombol mode "Atur Posisi & Ukuran" gambar (Batal /
+  Selesai). Kotak putus-putus & titik handle-nya digambar langsung di
+  canvas, sama polanya kayak mesh.css / ruler.css / brushsize.css.
+*/
+
+.image-place-mode-bar {
+  position: absolute;
+  bottom: 4px;
+  left: 50%;
+  transform: translateX(-50%);
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  background: var(--bg-panel-soft);
+  backdrop-filter: var(--panel-blur);
+  padding: 3px 4px;
+  border-radius: var(--radius-pill);
+  box-shadow: var(--shadow-float);
+  z-index: var(--z-floating-control);
+  max-width: calc(100% - 88px);
+}
+
+.image-place-btn {
+  width: 34px;
+  height: 34px;
+  padding: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: transparent;
+  border: none;
+  color: var(--accent);
+  border-radius: var(--radius-pill);
+  cursor: pointer;
+  flex-shrink: 0;
+  -webkit-tap-highlight-color: transparent;
+  touch-action: manipulation;
+  transition: background 0.15s ease, transform 0.1s ease;
+}
+
+.image-place-btn:active { transform: scale(0.92); background: var(--accent-active-bg); }
+
+.image-place-btn-primary { background: var(--accent); color: #ffffff; }
+.image-place-btn-primary:active { background: var(--accent-hover); }
+
+/*
+  LASSO.CSS
+  ---------
+  Cuma buat tampilan mode bar Lasso / Tongkat Ajaib / Kunci Gambar
+  (Batal, Opsi, Selesai, Tutup Area, Lepas Kunci). Kotak, garis lasso, &
+  handle rotate-nya digambar langsung di canvas (lihat LassoEngine.drawOverlay
+  di lasso.js) -- sama polanya kayak image-place.css / mesh.css / ruler.css.
+
+  Bilah sengaja digeser sedikit ke kiri dan dibatasi lebarnya supaya TIDAK
+  menimpa tombol melayang di pojok kanan bawah (panah sembunyi/tampil UI dan
+  reset zoom, lapisannya lebih atas dan menangkap ketukan).
+*/
+
+.lasso-mode-bar {
+  position: absolute;
+  bottom: 4px;
+  left: 50%;
+  transform: translateX(-50%);
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  background: var(--bg-panel-soft);
+  backdrop-filter: var(--panel-blur);
+  padding: 3px 4px;
+  border-radius: var(--radius-pill);
+  box-shadow: var(--shadow-float);
+  z-index: var(--z-floating-control);
+  max-width: calc(100% - 88px);
+}
+
+.lasso-hint {
+  color: var(--text-secondary);
+  font-size: 11px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  min-width: 0;
+  padding: 0 8px;
+}
+
+.lasso-btn {
+  background: transparent;
+  border: none;
+  color: var(--accent);
+  padding: 0;
+  border-radius: var(--radius-pill);
+  font-size: 12px;
+  cursor: pointer;
+  flex-shrink: 0;
+  -webkit-tap-highlight-color: transparent;
+  touch-action: manipulation;
+  transition: background 0.15s ease, transform 0.1s ease;
+}
+
+.lasso-btn:active {
+  transform: scale(0.92);
+  background: var(--accent-active-bg);
+}
+
+.lasso-btn-primary {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: #ffffff;
+}
+
+.lasso-btn-primary:active {
+  background: var(--accent-hover);
+}
+
+.lasso-btn-icon {
+  width: 34px;
+  height: 34px;
+  padding: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  line-height: 1;
+}
+
+.lasso-btn-on {
+  background: var(--accent-active-bg);
+}
+
+.lasso-ic {
+  width: 18px;
+  height: 18px;
+  display: block;
+  pointer-events: none;
+}
+
+/* Panel ikon opsi: muncul DI ATAS bilah saat tombol Opsi diketuk. */
+.lasso-more-panel {
+  position: absolute;
+  bottom: calc(100% + 6px);
+  left: 50%;
+  transform: translateX(-50%);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 2px;
+  width: max-content;
+  max-width: min(360px, calc(100vw - 72px));
+  padding: 6px 8px 4px;
+  background: var(--bg-panel-soft);
+  backdrop-filter: var(--panel-blur);
+  border-radius: 22px;
+  box-shadow: var(--shadow-float);
+}
+
+.lasso-more-panel .lasso-hint {
+  max-width: 100%;
+  font-size: 10.5px;
+  white-space: normal;
+  text-align: center;
+  line-height: 1.3;
+}
+
+.lasso-more-row {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 2px;
+}
+
+/*
+  BRUSHSIZE.CSS
+  -------------
+  Tampilan popover ukuran Brush/Eraser/Smudge (slider + tombol -/+ +
+  Tirus + Stabil) -- muncul di SAMPING Toolbar begitu tombol ukuran
+  (toolbar.js, deket Eraser) ditap. FIX (UX, gaya FlipaClip): dulu ini
+  bar yang SELALU ngambang di bawah canvas; sekarang disembunyikan
+  sampai ditap, biar gak makan tempat/numpuk kayak sebelumnya.
+*/
+
+.brushsize-popover {
+  position: fixed;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  background: var(--bg-panel-elevated);
+  backdrop-filter: var(--panel-blur);
+  border-radius: var(--radius-md);
+  padding: 10px;
+  box-shadow: var(--shadow-panel);
+  z-index: var(--z-toolbar);
+  width: 200px;
+}
+
+.brushsize-popover-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.brushsize-popover-row-secondary {
+  border-top: 1px solid var(--border-subtle);
+  padding-top: 6px;
+  justify-content: space-between;
+  flex-wrap: wrap;
+}
+
+.brushsize-taper-amount-row .brushsize-value {
+  min-width: 16px;
+}
+
+.brushsize-btn {
+  background: transparent;
+  border: none;
+  color: var(--accent);
+  width: 26px;
+  height: 26px;
+  border-radius: var(--radius-pill);
+  font-size: 16px;
+  line-height: 1;
+  cursor: pointer;
+  flex-shrink: 0;
+}
+
+.brushsize-slider {
+  flex: 1;
+  min-width: 0;
+  accent-color: var(--accent);
+}
+
+.brushsize-value {
+  color: var(--text-primary);
+  font-size: 12px;
+  min-width: 32px;
+  text-align: right;
+  flex-shrink: 0;
+}
+
+.brushsize-taper {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  color: var(--text-secondary);
+  font-size: 12px;
+  flex-shrink: 0;
+  white-space: nowrap;
+}
+
+.brushsize-taper input[type="checkbox"] {
+  width: 14px;
+  height: 14px;
+  margin: 0;
+  accent-color: var(--accent);
+}
+
+/* FITUR BARU: tombol Stabilisator + popover slidernya */
+.brushsize-stabilizer-btn {
+  background: transparent;
+  border: 1px solid var(--border-subtle);
+  color: var(--text-secondary);
+  font-size: 11px;
+  padding: 4px 8px;
+  border-radius: var(--radius-pill);
+  cursor: pointer;
+  flex-shrink: 0;
+  white-space: nowrap;
+}
+
+.brushsize-stabilizer-btn.is-active {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: #fff;
+}
+
+.stabilizer-popover {
+  position: fixed;
+  background: var(--bg-panel-elevated);
+  backdrop-filter: var(--panel-blur);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-md);
+  padding: 10px 12px;
+  box-shadow: var(--shadow-panel);
+  z-index: var(--z-overlay);
+  width: 200px;
+}
+
+.stabilizer-popover-title {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  color: var(--text-primary);
+  font-size: 12px;
+  margin-bottom: 8px;
+}
+
+.stabilizer-popover-value {
+  color: var(--text-secondary);
+}
+
+.stabilizer-popover-slider {
+  width: 100%;
+  accent-color: var(--accent);
+}
+
+/* Popover Tirus & Stabilisator (dibuka dari Top Bar) */
+.brushfx-popover { z-index: var(--z-overlay); width: 220px; }
+.brushfx-title {
+  display: flex;
+  justify-content: space-between;
+  color: var(--text-primary);
+  font-size: 12px;
+}
+.brushfx-title-2 { border-top: 1px solid var(--border-subtle); padding-top: 8px; }
+.brushfx-stab-val { color: var(--text-secondary); }
+.brushfx-popover .brushsize-value { min-width: 14px; }
+
+/*
+  COLORPANEL.CSS
+  --------------
+  Tampilan Color Panel (colorpanel.js): tab bar (Wheel/Palette/Recent/Gradient) +
+  isi tiap tab (Wheel, Palette, Recent & History, Gradient) -- tema terang
+  "Canvas Focus Mode", panel muncul sebagai floating drawer transparan.
+*/
+
+#editor-colorpanel {
+  position: absolute;
+  top: 76px;
+  right: 0;
+  height: calc(100% - 76px);
+  z-index: var(--z-floating-control);
+  pointer-events: none;
+}
+
+body.text-color-boost #editor-colorpanel {
+  z-index: var(--z-modal);
+}
+
+.colorpanel {
+  pointer-events: auto;
+  width: 320px;
+  max-width: 90vw;
+  height: 100%;
+  background: var(--bg-panel);
+  backdrop-filter: var(--panel-blur);
+  border-left: 1px solid var(--border-subtle);
+  box-shadow: var(--shadow-panel);
+  color: var(--text-primary);
+  font-size: 13px;
+  display: flex;
+  flex-direction: column;
+}
+
+/* ===== TAB BAR (selalu terlihat, tidak ikut scroll body) ===== */
+.colorpanel-tabbar {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 10px 12px;
+  border-bottom: 1px solid var(--border-subtle);
+  background: transparent;
+}
+
+.colorpanel-tabbar-scroll {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow-x: auto;
+  -webkit-overflow-scrolling: touch;
+  scrollbar-width: none;
+}
+
+.colorpanel-tabbar-scroll::-webkit-scrollbar {
+  display: none;
+}
+
+.colorpanel-tab {
+  flex: 0 0 auto;
+  background: var(--border-subtle);
+  border: none;
+  color: var(--text-secondary);
+  padding: 6px 10px;
+  border-radius: var(--radius-sm);
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.colorpanel-tab-active {
+  background: var(--accent);
+  color: #ffffff;
+}
+
+.colorpanel-tab-close {
+  flex: 0 0 auto;
+  margin-left: 8px;
+}
+
+/* ===== BODY (isi tiap tab, bisa digulir) ===== */
+.colorpanel-body {
+  flex: 1 1 auto;
+  overflow-y: auto;
+  padding: 12px;
+  box-sizing: border-box;
+}
+
+.colorpanel-subheader {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 10px;
+}
+
+.colorpanel-subheader-actions {
+  display: flex;
+  gap: 8px;
+  margin-bottom: 10px;
+}
+
+.colorpanel-title {
+  font-size: 14px;
+  font-weight: bold;
+}
+
+.colorpanel-icon-btn {
+  background: var(--border-subtle);
+  border: none;
+  color: var(--text-primary);
+  width: 28px;
+  height: 28px;
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  font-size: 14px;
+  flex: 0 0 auto;
+}
+
+.colorpanel-textbtn {
+  background: var(--border-subtle);
+  border: none;
+  color: var(--text-primary);
+  padding: 6px 10px;
+  border-radius: var(--radius-sm);
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.colorpanel-search {
+  width: 100%;
+  background: var(--border-subtle);
+  border: none;
+  color: var(--text-primary);
+  padding: 7px 10px;
+  border-radius: var(--radius-sm);
+  font-size: 13px;
+  box-sizing: border-box;
+  margin-bottom: 12px;
+}
+
+.colorpanel-section-title {
+  font-size: 12px;
+  font-weight: bold;
+  color: var(--text-secondary);
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+  margin: 14px 0 8px;
+}
+
+.colorpanel-empty {
+  font-size: 12px;
+  color: var(--text-secondary);
+  padding: 10px 4px;
+  margin: 0;
+}
+/* ===== ACTIVE COLOR (tab Wheel) ===== */
+.colorpanel-activecolor {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 14px;
+}
+
+.colorpanel-swatch-group {
+  position: relative;
+  width: 46px;
+  height: 46px;
+}
+
+.colorpanel-swatch {
+  position: absolute;
+  width: 32px;
+  height: 32px;
+  border-radius: 6px;
+  border: 1px solid var(--border-strong);
+  background-image:
+    linear-gradient(45deg, #ccc 25%, transparent 25%),
+    linear-gradient(-45deg, #ccc 25%, transparent 25%),
+    linear-gradient(45deg, transparent 75%, #ccc 75%),
+    linear-gradient(-45deg, transparent 75%, #ccc 75%);
+  background-size: 8px 8px;
+  background-position: 0 0, 0 4px, 4px -4px, -4px 0;
+}
+
+.colorpanel-swatch-secondary {
+  top: 14px;
+  left: 14px;
+}
+
+.colorpanel-swatch-primary {
+  top: 0;
+  left: 0;
+}
+
+/* ===== COLOR WHEEL ===== */
+.colorpanel-wheel-wrap {
+  display: flex;
+  justify-content: center;
+  margin-bottom: 14px;
+}
+
+.colorpanel-huering {
+  position: relative;
+  width: 180px;
+  height: 180px;
+  border-radius: 50%;
+  background: conic-gradient(
+    from 0deg,
+    red, yellow, lime, cyan, blue, magenta, red
+  );
+  touch-action: none;
+}
+
+.colorpanel-hueknob {
+  position: absolute;
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  background: #fff;
+  border: 2px solid #222;
+  transform: translate(-50%, -50%);
+  pointer-events: none;
+}
+
+.colorpanel-svbox {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  width: 84px;
+  height: 84px;
+  border-radius: 4px;
+  background-image:
+    linear-gradient(to top, #000, transparent),
+    linear-gradient(to right, #fff, transparent);
+  touch-action: none;
+}
+
+.colorpanel-svknob {
+  position: absolute;
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+  border: 2px solid #fff;
+  box-shadow: 0 0 2px rgba(0, 0, 0, 0.8);
+  transform: translate(-50%, -50%);
+  pointer-events: none;
+}
+.colorpanel-sliders {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-bottom: 12px;
+}
+
+.colorpanel-slider-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.colorpanel-slider-label {
+  width: 42px;
+  font-size: 12px;
+  color: var(--text-secondary);
+}
+
+.colorpanel-slider {
+  flex: 1;
+  accent-color: var(--accent);
+}
+
+.colorpanel-slider-value {
+  width: 34px;
+  text-align: right;
+  font-size: 12px;
+  color: var(--text-secondary);
+}
+
+.colorpanel-hex-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 12px;
+}
+
+.colorpanel-hex-row label {
+  font-size: 12px;
+  color: var(--text-secondary);
+}
+
+.colorpanel-hex-input {
+  flex: 1;
+  background: var(--border-subtle);
+  border: none;
+  color: var(--text-primary);
+  padding: 6px 8px;
+  border-radius: var(--radius-sm);
+  font-size: 13px;
+}
+
+.colorpanel-info {
+  font-size: 11px;
+  color: var(--text-secondary);
+  line-height: 1.6;
+  word-break: break-word;
+}
+
+/* ===== PALETTE (tab Palette) ===== */
+.colorpanel-palette-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.colorpanel-palette-card {
+  background: var(--bg-panel-elevated);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-sm);
+  overflow: hidden;
+}
+
+.colorpanel-palette-card-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 10px;
+  cursor: pointer;
+}
+
+.colorpanel-palette-expand {
+  width: 14px;
+  text-align: center;
+  color: var(--text-secondary);
+  flex: 0 0 auto;
+}
+
+.colorpanel-palette-name {
+  flex: 1 1 auto;
+  font-size: 13px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.colorpanel-palette-count {
+  font-size: 11px;
+  color: var(--text-secondary);
+  flex: 0 0 auto;
+}
+
+.colorpanel-palette-preview {
+  display: flex;
+  gap: 2px;
+  flex: 0 0 auto;
+}
+
+.colorpanel-palette-more {
+  width: 24px;
+  height: 24px;
+  font-size: 14px;
+}
+
+.colorpanel-palette-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(34px, 1fr));
+  gap: 6px;
+  padding: 4px 10px 10px;
+}
+/* ===== MINI SWATCH (dipakai di Palette preview/grid, Recent & History) ===== */
+.colorpanel-mini-swatch {
+  display: inline-block;
+  width: 16px;
+  height: 16px;
+  border-radius: 4px;
+  border: 1px solid var(--border-strong);
+  background-image:
+    linear-gradient(45deg, #ccc 25%, transparent 25%),
+    linear-gradient(-45deg, #ccc 25%, transparent 25%),
+    linear-gradient(45deg, transparent 75%, #ccc 75%),
+    linear-gradient(-45deg, transparent 75%, #ccc 75%);
+  background-size: 6px 6px;
+  background-position: 0 0, 0 3px, 3px -3px, -3px 0;
+  flex: 0 0 auto;
+}
+
+.colorpanel-mini-swatch-preview {
+  width: 14px;
+  height: 14px;
+}
+
+.colorpanel-mini-swatch-grid {
+  width: 36px;
+  height: 36px;
+  border-radius: 6px;
+  cursor: pointer;
+  touch-action: none;
+}
+
+/* ===== RECENT & HISTORY (tab Recent) ===== */
+.colorpanel-recent-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(34px, 1fr));
+  gap: 6px;
+  margin-bottom: 6px;
+}
+
+.colorpanel-history-list {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.colorpanel-history-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 8px;
+  border-radius: var(--radius-sm);
+  background: var(--bg-panel-elevated);
+  cursor: pointer;
+}
+
+.colorpanel-history-hex {
+  flex: 1 1 auto;
+  font-size: 12px;
+  color: var(--text-primary);
+}
+
+.colorpanel-history-time {
+  font-size: 11px;
+  color: var(--text-secondary);
+  flex: 0 0 auto;
+}
+
+.toolbar-color-btn {
+  width: 100%;
+  height: 28px;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--border-strong);
+  cursor: pointer;
+  margin-top: 4px;
+}
+
+/* ===== TAB GRADIENT ===== */
+.gradient-preview {
+  width: 100%;
+  height: 56px;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--border-subtle);
+  margin-bottom: 8px;
+}
+
+.gradient-hint {
+  margin: 0 0 12px 0;
+  font-size: 11px;
+  color: var(--text-secondary);
+  line-height: 1.4;
+}
+
+.colorpanel-checkbox-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--text-primary);
+  font-size: 13px;
+  cursor: pointer;
+  margin-bottom: 14px;
+}
+
+.gradient-type-row {
+  display: flex;
+  gap: 8px;
+  margin-bottom: 10px;
+}
+
+.gradient-type-btn {
+  flex: 1 1 auto;
+  background: var(--border-subtle);
+  border: none;
+  color: var(--text-secondary);
+  padding: 8px 6px;
+  border-radius: var(--radius-sm);
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.gradient-type-active {
+  background: var(--accent);
+  color: #ffffff;
+}
+/* ===== TAB PATTERN ===== */
+.pattern-preview {
+  display: block;
+  width: 100%;
+  image-rendering: pixelated;
+}
+
+.pattern-type-row {
+  flex-wrap: wrap;
+}
+
+.pattern-type-row .gradient-type-btn {
+  flex: 1 1 30%;
+}
+
+.colorpanel-action-btn {
+  width: 100%;
+  background: var(--accent);
+  color: #ffffff;
+  border: none;
+  padding: 10px;
+  border-radius: var(--radius-sm);
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+  margin: 8px 0;
+}
+/*
+  EYEDROPPER.CSS
+  --------------
+  Tampilan Magnifier (kaca pembesar saat drag), toast konfirmasi warna,
+  dan Eyedropper Panel (Sample Mode, Sample Alpha, dst) -- tema terang.
+*/
+
+/* ===== MAGNIFIER (muncul selama jari menyentuh & menggeser di canvas) ===== */
+.eyedropper-magnifier {
+  position: fixed;
+  z-index: var(--z-topbar);
+  pointer-events: none;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+}
+
+.eyedropper-magnifier-canvas {
+  width: 96px;
+  height: 96px;
+  border-radius: 50%;
+  border: 3px solid #ffffff;
+  box-shadow: var(--shadow-panel);
+  background: #000;
+}
+
+.eyedropper-magnifier-swatch {
+  width: 28px;
+  height: 14px;
+  border-radius: 4px;
+  border: 1px solid #ffffff;
+  box-shadow: var(--shadow-float);
+}
+
+/* ===== TOAST KONFIRMASI (muncul singkat setelah warna diambil) ===== */
+.eyedropper-confirm {
+  position: fixed;
+ top: 70px;
+  left: 50%;
+  transform: translateX(-50%) translateY(-10px);
+  z-index: var(--z-topbar);
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  background: var(--bg-panel-elevated);
+  backdrop-filter: var(--panel-blur);
+  border: 1px solid var(--border-subtle);
+  color: var(--text-primary);
+  font-size: 12px;
+  padding: 8px 14px;
+  border-radius: var(--radius-pill);
+  box-shadow: var(--shadow-panel);
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 0.2s ease, transform 0.2s ease;
+}
+
+.eyedropper-confirm-show {
+  opacity: 1;
+  transform: translateX(-50%) translateY(0);
+}
+
+.eyedropper-confirm-swatch {
+  width: 16px;
+  height: 16px;
+  border-radius: 4px;
+  border: 1px solid var(--border-strong);
+  flex: 0 0 auto;
+}
+
+/* ===== EYEDROPPER PANEL (pengaturan) ===== */
+.eyedropper-panel {
+  position: fixed;
+  z-index: var(--z-toolbar);
+  width: 240px;
+  background: var(--bg-panel-elevated);
+  backdrop-filter: var(--panel-blur);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-md);
+  box-shadow: var(--shadow-panel);
+  color: var(--text-primary);
+  font-size: 13px;
+  padding: 10px;
+  box-sizing: border-box;
+}
+
+.eyedropper-panel-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 10px;
+}
+
+.eyedropper-panel-title {
+  font-size: 13px;
+  font-weight: bold;
+}
+
+.eyedropper-panel-close {
+  background: var(--border-subtle);
+  border: none;
+  color: var(--text-primary);
+  width: 24px;
+  height: 24px;
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  font-size: 12px;
+}
+
+.eyedropper-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 6px 0;
+  border-top: 1px solid var(--border-subtle);
+}
+
+.eyedropper-row:first-of-type {
+  border-top: none;
+}
+
+.eyedropper-row-label {
+  font-size: 12px;
+  color: var(--text-secondary);
+}
+
+.eyedropper-segmented {
+  display: flex;
+  gap: 4px;
+}
+
+.eyedropper-segmented-btn {
+  background: var(--border-subtle);
+  border: none;
+  color: var(--text-secondary);
+  font-size: 11px;
+  padding: 5px 8px;
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+}
+
+.eyedropper-segmented-active {
+  background: var(--accent);
+  color: #ffffff;
+}
+
+.eyedropper-toggle {
+  background: var(--border-subtle);
+  border: none;
+  color: var(--text-secondary);
+  font-size: 11px;
+  padding: 5px 10px;
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  min-width: 40px;
+}
+
+.eyedropper-toggle-on {
+  background: rgba(76, 175, 80, 0.18);
+  color: #2e7d32;
+}
+
+/* ===== IKON Eyedropper aktif di Toolbar (konsisten dengan tool lain) ===== */
+.toolbar-btn-active[data-id="eyedropper"] {
+  color: #2e7d32;
+}
+
+/*
+  EXPORT.CSS
+  ----------
+  Tampilan modal Export (export.js): overlay full-screen + kartu modal
+  di tengah, tab pilihan format, progress bar, dan tombol aksi.
+  Ikut tema terang "Canvas Focus Mode" + warna aksen tema aktif.
+*/
+
+.export-modal-overlay {
+  position: fixed;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  background: rgba(20, 20, 20, 0.35);
+  z-index: var(--z-modal-dim);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.export-modal {
+  width: 360px;
+  max-width: 92vw;
+  max-height: 88vh;
+  overflow-y: auto;
+  background: var(--bg-panel-elevated);
+  backdrop-filter: var(--panel-blur);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-md);
+  box-shadow: var(--shadow-panel);
+  color: var(--text-primary);
+  font-size: 13px;
+  display: flex;
+  flex-direction: column;
+}
+
+.export-modal-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 12px 14px;
+  border-bottom: 1px solid var(--border-subtle);
+  font-size: 15px;
+  font-weight: bold;
+}
+
+.export-modal-close {
+  background: transparent;
+  border: none;
+  color: var(--text-secondary);
+  font-size: 16px;
+  cursor: pointer;
+  padding: 2px 6px;
+}
+
+.export-modal-tabs {
+  display: flex;
+  gap: 6px;
+  padding: 12px 14px 0 14px;
+  flex-wrap: wrap;
+}
+
+.export-tab-btn {
+  flex: 1 1 auto;
+  background: var(--border-subtle);
+  border: none;
+  color: var(--text-secondary);
+  padding: 8px 6px;
+  border-radius: var(--radius-sm);
+  font-size: 12px;
+  cursor: pointer;
+  text-align: center;
+}
+
+.export-tab-btn.active {
+  background: var(--accent);
+  color: #ffffff;
+}
+
+.export-tab-btn:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+.export-modal-body {
+  padding: 14px;
+}
+
+.export-info {
+  margin: 0 0 10px 0;
+  color: var(--text-secondary);
+  font-size: 12px;
+}
+
+.export-checkbox-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--text-primary);
+  font-size: 12px;
+  cursor: pointer;
+  accent-color: var(--accent);
+}
+
+.export-modal-progress {
+  padding: 0 14px 10px 14px;
+}
+
+.export-progress-bar {
+  width: 100%;
+  height: 8px;
+  background: var(--border-subtle);
+  border-radius: 4px;
+  overflow: hidden;
+  margin-bottom: 6px;
+}
+
+.export-progress-fill {
+  height: 100%;
+  width: 0%;
+  background: var(--accent);
+  transition: width 0.15s linear;
+}
+
+#export-progress-label {
+  color: var(--text-secondary);
+  font-size: 12px;
+}
+
+.export-modal-result {
+  padding: 4px 14px 14px 14px;
+}
+
+.export-result-text {
+  margin: 0 0 10px 0;
+  font-size: 14px;
+  font-weight: bold;
+  color: var(--text-primary);
+}
+
+.export-preview-wrap {
+  margin: 0 0 10px 0;
+}
+
+.export-preview-media {
+  width: 100%;
+  max-height: 260px;
+  object-fit: contain;
+  background: #000;
+  border-radius: var(--radius-sm);
+  display: block;
+}
+
+.export-preview-note {
+  margin: 0;
+  color: var(--text-secondary);
+  font-size: 11px;
+  line-height: 1.4;
+}
+
+.export-result-actions {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.export-result-actions .export-btn {
+  width: 100%;
+}
+
+.export-result-hint {
+  margin: 10px 0 0 0;
+  color: var(--text-secondary);
+  font-size: 11px;
+  line-height: 1.4;
+}
+
+.export-modal-footer {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  padding: 12px 14px;
+  border-top: 1px solid var(--border-subtle);
+}
+
+.export-btn {
+  padding: 8px 14px;
+  border-radius: var(--radius-sm);
+  font-size: 13px;
+  cursor: pointer;
+  border: 1px solid var(--border-subtle);
+}
+
+.export-btn-secondary {
+  background: var(--border-subtle);
+  color: var(--text-primary);
+}
+
+.export-btn-primary {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: #ffffff;
+  font-weight: bold;
+}
+
+.export-btn:disabled {
+  opacity: 0.6;
+  cursor: default;
+}
+
+/*
+  TEXT.CSS
+  --------
+  Tampilan modal input teks (text.js): overlay full-screen + kartu
+  kecil di tengah buat ngetik teks, atur ukuran font, lihat warna.
+  Dibikin file TERPISAH dari export.css supaya gak nyenggol styling
+  modal Export yang sudah jalan.
+*/
+
+.text-input-overlay {
+  position: fixed;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  background: rgba(20, 20, 20, 0.35);
+  z-index: var(--z-modal-dim);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.text-input-modal {
+  width: 320px;
+  max-width: 90vw;
+  background: var(--bg-panel-elevated);
+  backdrop-filter: var(--panel-blur);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-md);
+  box-shadow: var(--shadow-panel);
+  color: var(--text-primary);
+  font-size: 13px;
+  display: flex;
+  flex-direction: column;
+  padding: 14px;
+  gap: 10px;
+}
+
+.text-input-header {
+  font-size: 15px;
+  font-weight: bold;
+}
+
+.text-input-textarea {
+  width: 100%;
+  min-height: 80px;
+  resize: vertical;
+  background: var(--bg-panel);
+  color: var(--text-primary);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-sm);
+  padding: 8px;
+  font-size: 14px;
+  font-family: inherit;
+}
+
+.text-input-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.text-input-label {
+  font-size: 11px;
+  color: var(--text-secondary);
+  flex-shrink: 0;
+}
+
+.text-input-size {
+  flex: 1;
+  accent-color: var(--accent);
+}
+
+.text-input-size-value {
+  font-size: 11px;
+  color: var(--text-primary);
+  width: 40px;
+  flex-shrink: 0;
+}
+
+.text-input-color-preview {
+  width: 18px;
+  height: 18px;
+  border-radius: 4px;
+  border: 1px solid var(--border-subtle);
+  flex-shrink: 0;
+  padding: 0;
+  cursor: pointer;
+}
+
+/* FITUR BARU: variasi Font & Efek teks */
+.text-input-font-scroll {
+  display: flex;
+  gap: 6px;
+  overflow-x: auto;
+  padding-bottom: 2px;
+  scrollbar-width: none;
+}
+.text-input-font-scroll::-webkit-scrollbar {
+  display: none;
+}
+
+.text-input-font-chip {
+  flex-shrink: 0;
+  background: var(--bg-panel);
+  border: 1px solid var(--border-subtle);
+  color: var(--text-primary);
+  padding: 8px 12px;
+  border-radius: var(--radius-pill);
+  font-size: 13px;
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.text-input-font-chip-active {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: #ffffff;
+}
+
+.text-input-style-btn {
+  background: var(--bg-panel);
+  border: 1px solid var(--border-subtle);
+  color: var(--text-primary);
+  width: 30px;
+  height: 30px;
+  border-radius: var(--radius-sm);
+  font-size: 14px;
+  cursor: pointer;
+}
+
+.text-input-style-btn-active {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: #ffffff;
+}
+
+.text-input-effect-row {
+  display: flex;
+  gap: 6px;
+}
+
+.text-input-effect-btn {
+  flex: 1;
+  background: var(--bg-panel);
+  border: 1px solid var(--border-subtle);
+  color: var(--text-primary);
+  padding: 7px 4px;
+  border-radius: var(--radius-sm);
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.text-input-effect-btn-active {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: #ffffff;
+}
+
+.text-input-footer {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
+.text-input-btn {
+  background: var(--border-subtle);
+  border: none;
+  color: var(--text-primary);
+  padding: 8px 14px;
+  border-radius: var(--radius-sm);
+  font-size: 13px;
+  cursor: pointer;
+}
+
+.text-input-btn-primary {
+  background: var(--accent);
+  color: #ffffff;
+}
+/*
+  THEMEMANAGER.CSS -- FILE BARU
+  -----------------------------
+  Tombol kecil buat ganti tema warna (Biru <-> Pink). Melayang di
+  pojok kanan bawah, di atas komponen lain (z-index tinggi), tapi
+  kecil & tidak mengganggu canvas.
+*/
+
+#theme-switch-btn {
+  position: fixed;
+  right: 16px;
+  bottom: 112px;
+  width: 34px;
+  height: 34px;
+  border-radius: var(--radius-pill);
+  background: transparent;
+  border: none;
+  color: var(--accent);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  padding: 0;
+  z-index: var(--z-fab-low);
+  filter: drop-shadow(var(--shadow-float));
+}
+
+#theme-switch-btn:active {
+  transform: scale(0.9);
+}
+
+#theme-switch-btn svg {
+  width: 22px;
+  height: 22px;
+}
+
+/* Sembunyi otomatis saat Timeline drawer dibuka, biar gak numpuk. */
+body.timeline-open #theme-switch-btn {
+  opacity: 0;
+  pointer-events: none;
+}
+
+#theme-switch-btn.ui-hidden {
+  opacity: 0;
+  pointer-events: none;
+}
+
+/*
+  APPMODE.CSS -- FILE BARU (Mode Scene, Fase A)
+  Cuma buat penanda mode. Gak menyentuh style fitur lain.
+*/
+
+/* Penanda kecil di Editor (cuma muncul di Mode Scene). Gak bisa ditap,
+   jadi gak bakal nutupin/ngeganggu sentuhan ke canvas. */
+.appmode-chip {
+  position: fixed;
+  left: 50%;
+  transform: translateX(-50%);
+  bottom: calc(env(safe-area-inset-bottom, 0px) + 30px);
+  padding: 3px 10px;
+  border-radius: 999px;
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  color: var(--accent, #4aa8ff);
+  border: 1px solid var(--accent, #4aa8ff);
+  background: transparent;
+  opacity: 0.75;
+  pointer-events: none;
+  z-index: 5;
+}
+
+/* Penanda di kartu Galeri (cuma buat project Mode Scene). */
+.gallery-mode-tag {
+  margin-left: 4px;
+  padding: 0 6px;
+  border-radius: 999px;
+  font-size: 10px;
+  font-weight: 700;
+  color: var(--accent, #4aa8ff);
+  border: 1px solid var(--accent, #4aa8ff);
+}
+/* Mode Scene: laci timeline keyframe lama gak dipakai, sembunyikan. */
+.editor-page[data-app-mode="scene"] #editor-timeline {
+  display: none;
+}
+/*
+  SEQUENCE.CSS -- FILE BARU (Mode Scene, Fase B, versi PANEL)
+  Panel Sequence tampilannya mengikuti panel Layer. Menggambar Sequence dilakukan di canvas utama. Gak menyentuh style fitur lain.
+*/
+
+/* Tombol buka/tutup panel */
+.seq-open-btn {
+  position: fixed;
+  left: 14px;
+  bottom: calc(var(--timeline-live-height, 0px) + var(--sceneline-h, 0px) + env(safe-area-inset-bottom, 0px) + 84px);
+  min-width: 96px;
+  min-height: 44px;
+  padding: 10px 18px;
+  border-radius: 999px;
+  font-size: 14px;
+  font-weight: 700;
+  touch-action: none;
+  -webkit-tap-highlight-color: transparent;
+  user-select: none;
+  -webkit-user-select: none;
+  cursor: pointer;
+  color: var(--accent, #4aa3e0);
+  background: var(--bg-panel-elevated, rgba(255,255,255,0.97));
+border: 1px solid var(--accent, #4aa3e0);
+  z-index: 450;
+}
+
+/* Panel: numpang di bawah panel Layer (posisi & ukuran sepadan) */
+#editor-sequencepanel {
+  position: absolute;
+  top: calc(84px + 30vh + 12px);
+  top: calc(84px + 30dvh + 12px);
+  right: 8px;
+  z-index: var(--z-side-panel, 200);
+  width: 220px;
+height: auto;
+  max-height: calc(100vh - (84px + 30vh + 12px) - 70px);
+  max-height: calc(100dvh - (84px + 30dvh + 12px) - 70px);
+  border-radius: var(--radius-md, 12px);
+  overflow: hidden;
+  box-shadow: var(--shadow-panel);
+  transition: transform 0.18s ease, opacity 0.18s ease;
+}
+
+#editor-sequencepanel.seqp-hidden,
+.editor-page:not([data-seq-edit]) #editor-layerpanel.layerpanel-expanded ~ #editor-sequencepanel {
+  transform: translateX(calc(100% + 16px));
+  opacity: 0;
+  pointer-events: none;
+}
+
+@media (orientation: landscape) and (max-height: 500px) {
+  #editor-sequencepanel {
+    top: calc(58px + 30vh + 12px);
+    top: calc(58px + 30dvh + 12px);
+    max-height: calc(100vh - (58px + 30vh + 12px) - 20px);
+    max-height: calc(100dvh - (58px + 30dvh + 12px) - 20px);
+  }
+}
+
+.seqp {
+  width: 100%;
+  height: auto;
+  max-height: inherit;
+  box-sizing: border-box;
+  background: var(--bg-panel);
+  backdrop-filter: var(--panel-blur);
+  border-left: 1px solid var(--border-subtle);
+  display: flex;
+  flex-direction: column;
+  font-family: var(--font-base);
+  color: var(--text-primary);
+}
+
+.seqp-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: var(--space-sm) var(--space-md);
+  font-size: 12px;
+  color: var(--text-secondary);
+  border-bottom: 1px solid var(--border-subtle);
+}
+
+.seqp-add-btn {
+  background: var(--accent);
+  border: none;
+  color: #ffffff;
+  width: 24px;
+  height: 24px;
+  border-radius: var(--radius-pill, 999px);
+  cursor: pointer;
+  font-size: 14px;
+  line-height: 1;
+}
+.seqp-add-btn:active { transform: scale(0.92); }
+
+.seqp-list {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+}
+
+.seqp-empty {
+  padding: var(--space-lg) var(--space-sm);
+  font-size: 12px;
+  color: var(--text-secondary);
+  opacity: 0.7;
+  text-align: center;
+  margin: 0;
+}
+
+.seqp-item {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: var(--space-sm) var(--space-md);
+  border-bottom: 1px solid var(--border-subtle);
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+}
+.seqp-item-active { background: var(--accent-active-bg); }
+
+.seqp-item-top,
+.seqp-item-bottom {
+  display: flex;
+  align-items: center;
+  gap: var(--space-sm);
+}
+
+.seqp-thumb {
+  flex: 0 0 auto;
+  width: 36px;
+  height: 36px;
+  border-radius: 6px;
+  overflow: hidden;
+  background-color: #fff;
+  background-image:
+    linear-gradient(45deg, #e4e4e4 25%, transparent 25%, transparent 75%, #e4e4e4 75%),
+    linear-gradient(45deg, #e4e4e4 25%, transparent 25%, transparent 75%, #e4e4e4 75%);
+  background-size: 8px 8px;
+  background-position: 0 0, 4px 4px;
+  border: 1px solid var(--border-subtle);
+}
+.seqp-thumb img { width: 100%; height: 100%; object-fit: contain; display: block; }
+
+.seqp-name {
+  flex: 1;
+  min-width: 0;
+  font-size: 12px;
+  font-weight: 600;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.seqp-mini-btn {
+  background: none;
+  border: none;
+  color: var(--text-secondary);
+  font-size: 13px;
+  padding: 2px 4px;
+  cursor: pointer;
+}
+.seqp-mini-danger { color: #d94a4a; }
+
+.seqp-badge {
+  font-size: 10px;
+  color: var(--text-secondary);
+}
+
+.seqp-frames {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 0 2px;
+  overflow-x: auto;
+}
+.seqp-frame {
+  position: relative;
+  flex: 0 0 auto;
+  width: 40px;
+  height: 40px;
+  padding: 0;
+  border-radius: 6px;
+  overflow: hidden;
+  border: 2px solid var(--border-subtle);
+  background: #fff;
+}
+.seqp-frame-on { border-color: var(--accent); }
+.seqp-frame img {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+}
+.seqp-frame-num {
+  position: absolute;
+  left: 3px;
+  bottom: 1px;
+  font-size: 9px;
+  font-weight: 700;
+  color: #555;
+}
+.seqp-frame-act {
+  flex: 0 0 auto;
+  width: 30px;
+  height: 30px;
+  border-radius: var(--radius-pill, 999px);
+  border: 1px solid var(--accent);
+  background: transparent;
+  color: var(--accent);
+  font-size: 15px;
+  line-height: 1;
+}
+.seqp-frame-act-danger { border-color: #d94a4a; color: #d94a4a; font-size: 13px; }
+
+
+/* Tombol Gambar per Sequence */
+.seqp-item-bottom { justify-content: space-between; }
+.seqp-draw-btn {
+  padding: 3px 10px;
+  font-size: 11px;
+  font-weight: 700;
+  border-radius: 999px;
+  border: 1px solid var(--accent);
+  background: transparent;
+  color: var(--accent);
+}
+
+/* ===== Sesi menggambar Sequence (canvas utama) ===== */
+/* Panel Layer disembunyikan selama menggambar Sequence, panel Sequence pindah ke posisinya */
+.editor-page[data-seq-edit] #editor-layerpanel,
+.editor-page[data-seq-edit] #editor-meshpanel,
+.editor-page[data-seq-edit] #editor-meshtransformpanel {
+  display: none;
+}
+.editor-page[data-seq-edit] #editor-sequencepanel {
+  top: 84px;
+  height: auto;
+  max-height: 60vh;
+  max-height: 60dvh;
+  transform: none;
+  opacity: 1;
+  pointer-events: auto;
+}
+.editor-page[data-seq-edit] .seq-open-btn { display: none; }
+
+.seqp-edit-title {
+  font-weight: 700;
+  color: var(--text-primary);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  max-width: 120px;
+}
+.seqp-done-btn {
+  padding: 4px 12px;
+  font-size: 12px;
+  font-weight: 700;
+  border: none;
+  border-radius: 999px;
+  color: #fff;
+  background: var(--accent);
+}
+.seqp-edit-body { padding: var(--space-sm) var(--space-md); }
+.seqp-hint {
+  margin: 0 0 6px;
+  font-size: 11px;
+  color: var(--text-secondary);
+}
+.seqp-edit-acts { display: flex; gap: 6px; margin-top: 8px; }
+.seqp-act {
+  flex: 1;
+  padding: 6px 4px;
+  font-size: 11px;
+  border-radius: 8px;
+  border: 1px solid var(--border-strong, rgba(20,20,20,0.16));
+  background: transparent;
+  color: inherit;
+}
+.seqp-act-danger { color: #d94a4a; border-color: #d94a4a; }
+
+
+/* ===== B3: urutan + repeat ===== */
+.seqp-order {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  margin-top: 4px;
+}
+.seqp-order-text {
+  flex: 1;
+  min-width: 0;
+  font-size: 11px;
+  font-weight: 600;
+  word-break: break-word;
+}
+.seqp-repeat {
+  margin-top: 6px;
+  padding: 5px 10px;
+  font-size: 11px;
+  font-weight: 700;
+  border-radius: 999px;
+  border: 1px solid var(--border-strong, rgba(20,20,20,0.16));
+  background: transparent;
+  color: var(--text-secondary);
+  align-self: flex-start;
+}
+.seqp-repeat-on {
+  color: #fff;
+  background: var(--accent);
+  border-color: var(--accent);
+}
+
+
+/* ===== B4: referensi samar ===== */
+.seqp-ref-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-top: 6px;
+}
+.seqp-ref-label {
+  flex: 0 0 auto;
+  min-width: 52px;
+  font-size: 11px;
+  color: var(--text-secondary);
+}
+.seqp-ref-slider { flex: 1; min-width: 0; }
+.seqp-ref-select {
+  flex: 1;
+  min-width: 0;
+  font-size: 11px;
+  padding: 3px 4px;
+  border-radius: 6px;
+  border: 1px solid var(--border-strong, rgba(20,20,20,0.16));
+  background: transparent;
+  color: inherit;
+}
+/* ===== Fase C1: GUNAKAN ===== */
+.seq-use-bar {
+  position: fixed;
+  top: calc(env(safe-area-inset-top, 0px) + 92px);
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: var(--z-floating-control, 300);
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  max-width: calc(100vw - 16px);
+  padding: 6px 8px 6px 12px;
+  border-radius: 999px;
+  background: var(--bg-panel-elevated, rgba(255,255,255,0.97));
+  border: 1px solid var(--accent, #4aa3e0);
+  box-shadow: var(--shadow-panel);
+}
+.seq-use-hint {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text-secondary);
+  white-space: nowrap;
+}
+.seq-use-btn {
+  padding: 6px 12px;
+  font-size: 12px;
+  font-weight: 700;
+  border-radius: 999px;
+  border: 1px solid var(--border-strong, rgba(20,20,20,0.16));
+  background: transparent;
+  color: var(--text-secondary);
+  white-space: nowrap;
+}
+.seq-use-ok {
+  color: #fff;
+  background: var(--accent);
+  border-color: var(--accent);
+}
+.seq-use-ok:disabled {
+  opacity: 1;
+}
+/* Area belum siap: tombol tetap jelas terbaca (tidak pudar), hanya sedikit lebih kalem */
+.seq-use-ok.seq-use-ok-wait {
+  opacity: 1;
+}
+/* Selama Gunakan: bar opsi Lasso biasa disembunyikan (cukup Batal / Pakai di sini) */
+.editor-page[data-seq-use] #lasso-transform-bar {
+  display: none;
+}
+.seqp-use-btn {
+  margin-left: 6px;
+}
+.seqp-uses {
+  margin-top: 6px;
+}
+.seqp-use-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 6px;
+  font-size: 11px;
+  color: var(--text-secondary);
+}
+.seqp-use-text {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+/* ===== Fase C2: tampilan Sequence di area ===== */
+.seq-overlay {
+  position: absolute;
+  left: 1px;
+  top: 1px;
+  width: calc(100% - 2px);
+  height: calc(100% - 2px);
+  pointer-events: none;
+  z-index: 2;
+}
+/* ===== Fase C4: atur posisi & ukuran area ===== */
+.seqp-tf-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  margin: 2px 0 8px;
+}
+.seqp-tf-row .seqp-mini-btn {
+  min-width: 34px;
+  padding: 6px 8px;
+  font-size: 13px;
+  font-weight: 700;
+  border: 1px solid var(--border-strong, rgba(20,20,20,0.16));
+  border-radius: 8px;
+}
+/* ===== Fase D1: Rekam + daftar Scene ===== */
+.scene-rec-btn,
+.scene-list-btn {
+  position: fixed;
+  left: 14px;
+  min-width: 96px;
+  min-height: 44px;
+  padding: 10px 18px;
+  border-radius: 999px;
+  font-size: 14px;
+  font-weight: 700;
+  touch-action: none;
+  -webkit-tap-highlight-color: transparent;
+  user-select: none;
+  -webkit-user-select: none;
+  cursor: pointer;
+  color: var(--accent, #4aa3e0);
+  background: var(--bg-panel-elevated, rgba(255,255,255,0.97));
+border: 1px solid var(--accent, #4aa3e0);
+  z-index: 450;
+}
+.scene-rec-btn {
+bottom: calc(var(--timeline-live-height, 0px) + var(--sceneline-h, 0px) + env(safe-area-inset-bottom, 0px) + 138px);
+  color: #d94a4a;
+  border-color: #d94a4a;
+}
+.scene-rec-btn.scene-rec-on {
+  color: #fff;
+  background: #d94a4a;
+}
+.scene-list-btn {
+bottom: calc(var(--timeline-live-height, 0px) + var(--sceneline-h, 0px) + env(safe-area-inset-bottom, 0px) + 192px);
+}
+#editor-scenepanel {
+  position: fixed;
+  left: 14px;
+bottom: calc(var(--timeline-live-height, 0px) + var(--sceneline-h, 0px) + env(safe-area-inset-bottom, 0px) + 248px);
+  z-index: 450;
+  width: 230px;
+  max-height: 40vh;
+  max-height: 40dvh;
+  display: flex;
+  flex-direction: column;
+  border-radius: var(--radius-md, 12px);
+  overflow: hidden;
+  background: var(--bg-panel-elevated, rgba(255,255,255,0.97));
+  box-shadow: var(--shadow-panel);
+}
+#editor-scenepanel.scenep-hidden {
+  display: none;
+}
+.scenep-header {
+  padding: 8px 12px;
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--text-secondary);
+}
+.scenep-list {
+  overflow-y: auto;
+  padding: 0 8px 8px;
+}
+.scenep-empty {
+  margin: 4px;
+  font-size: 11px;
+  color: var(--text-secondary);
+}
+.scenep-item {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 6px 4px;
+  border-top: 1px solid var(--border-strong, rgba(20,20,20,0.10));
+}
+.scenep-info {
+  flex: 1;
+  min-width: 0;
+}
+.scenep-name {
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--text-primary);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.scenep-meta {
+  font-size: 11px;
+  color: var(--text-secondary);
+}
+.scenep-btn {
+  background: none;
+  border: none;
+  min-width: 44px;
+  min-height: 44px;
+  padding: 10px 12px;
+  font-size: 16px;
+  touch-action: none;
+  -webkit-tap-highlight-color: transparent;
+  color: var(--text-secondary);
+}
+.scenep-danger {
+  color: #d94a4a;
+}
+.editor-page[data-seq-edit] .scene-rec-btn,
+.editor-page[data-seq-edit] .scene-list-btn,
+.editor-page[data-seq-edit] #editor-scenepanel,
+.editor-page[data-seq-use] .scene-rec-btn,
+.editor-page[data-seq-use] .scene-list-btn,
+.editor-page[data-seq-use] #editor-scenepanel {
+  display: none;
+}
+.scenep-play { color: var(--accent, #3b82f6); }
+.scenep-play.scenep-playing { color: #d94a4a; }
+
+.scenep-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+.scenep-tl-btn {
+  background: none;
+  border: 1px solid var(--accent, #4aa3e0);
+  border-radius: 999px;
+  min-height: 32px;
+  padding: 4px 12px;
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--accent, #4aa3e0);
+  -webkit-tap-highlight-color: transparent;
+}
+/* ===== Hitung mundur 3-2-1 sebelum rekam ===== */
+#scene-countdown {
+  position: fixed;
+  top: 0; right: 0; bottom: 0; left: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  pointer-events: none;
+  z-index: 2000;
+  font-size: 28vmin;
+  font-weight: 800;
+  line-height: 1;
+  color: #fff;
+  text-shadow: 0 0 24px rgba(0,0,0,0.55), 0 0 4px rgba(0,0,0,0.7);
+}
+#scene-countdown.scene-cd-pop { animation: scene-cd-pop 1s ease-out both; }
+@keyframes scene-cd-pop {
+  0%   { transform: scale(1.5); opacity: 0; }
+  20%  { transform: scale(1);   opacity: 1; }
+  80%  { transform: scale(1);   opacity: 1; }
+  100% { transform: scale(0.85); opacity: 0; }
+}
+/* ===== Bayangan gambar sebelum/sesudah (flipbook) ===== */
+.seq-onion {
+  position: absolute;
+  left: 1px;
+  top: 1px;
+  width: calc(100% - 2px);
+  height: calc(100% - 2px);
+  pointer-events: none;
+  z-index: 2;
+}
+.seqp-onion-row { display: flex; gap: 6px; margin-top: 8px; }
+.seqp-chip {
+  flex: 1;
+  min-height: 40px;
+  padding: 6px 4px;
+  font-size: 11px;
+  font-weight: 700;
+  border-radius: 999px;
+  border: 1px solid var(--border-strong, rgba(20,20,20,0.16));
+  background: transparent;
+  color: var(--text-secondary);
+  touch-action: manipulation;
+}
+.seqp-chip-red.seqp-chip-on { background: #ff3b3b; border-color: #ff3b3b; color: #fff; }
+.seqp-chip-green.seqp-chip-on { background: #16c060; border-color: #16c060; color: #fff; }
+
+/* ===== Tombol panel Sequence: lebih besar & gampang diketuk ===== */
+#editor-sequencepanel { width: 260px; }
+#editor-sequencepanel button,
+#editor-sequencepanel input,
+#editor-sequencepanel select { touch-action: manipulation; -webkit-tap-highlight-color: transparent; }
+.seqp-done-btn { min-height: 40px; padding: 6px 18px; font-size: 13px; }
+.seqp-add-btn { width: 40px; height: 40px; font-size: 20px; }
+.seqp-mini-btn { min-width: 40px; min-height: 40px; font-size: 16px; padding: 6px; }
+.seqp-draw-btn { min-height: 40px; padding: 6px 16px; font-size: 12px; }
+.seqp-repeat { min-height: 40px; padding: 8px 14px; font-size: 12px; }
+.seqp-frame { width: 56px; height: 56px; }
+.seqp-frame-num { font-size: 11px; }
+.seqp-frames { gap: 8px; padding: 6px 0 8px; touch-action: pan-x; }
+.seqp-edit-acts { gap: 8px; }
+.seqp-act { min-height: 44px; padding: 8px 4px; font-size: 12px; font-weight: 600; }
+.seqp-ref-select { min-height: 36px; font-size: 12px; }
+.seqp-ref-slider { min-height: 32px; }
+.seqp-header { min-height: 48px; }
+/* ===== Panel lemot: tanda "menyimpan…" langsung muncul ===== */
+#editor-sequencepanel.seqp-busy button,
+#editor-sequencepanel.seqp-busy input,
+#editor-sequencepanel.seqp-busy select { pointer-events: none; opacity: 0.55; }
+#editor-sequencepanel.seqp-busy .seqp-header > span:first-child::after { content: " · menyimpan…"; font-weight: 400; opacity: 0.7; }
+
+/* ===== Ketuk judul = panel lipat jadi tulisan "Sequence" saja ===== */
+#editor-sequencepanel.seqp-collapsed .seqp-list { display: none; }
+#editor-sequencepanel.seqp-collapsed .seqp-add-btn { display: none; }
+#editor-sequencepanel.seqp-collapsed .seqp-header { border-bottom: none; }
+.editor-page:not([data-seq-edit]) #editor-sequencepanel.seqp-collapsed { width: auto; min-width: 110px; }
+
+/* ==== Tombol berikon di panel Sequence (pengganti tulisan, hemat tempat) ==== */
+.seqp-svg { width: 20px; height: 20px; flex: none; }
+.seqp-ico-row { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 6px; }
+.seqp-ico {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 40px;
+  height: 40px;
+  padding: 0;
+  border-radius: 999px;
+  border: 1px solid var(--border-strong, rgba(20,20,20,0.16));
+  background: transparent;
+  color: var(--text-secondary);
+}
+.seqp-ico-on { color: #fff; background: var(--accent); border-color: var(--accent); }
+.seqp-ico-ref { margin-top: 8px; }
+.seqp-draw-btn,
+.seqp-done-btn,
+.seqp-act,
+.seqp-chip {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.seqp-draw-btn { min-width: 40px; padding: 6px 10px; }
+.seqp-done-btn { min-width: 48px; padding: 6px 12px; }
+.seqp-mini-btn { display: flex; align-items: center; justify-content: center; }
+.seqp-mini-btn .seqp-svg { width: 18px; height: 18px; }
+
+/*
+  SCENELINE.CSS -- FILE BARU (Mode Scene, Fase E langkah 1)
+  Timeline Scene gaya CapCut. Gak menyentuh style fitur lain.
+*/
+#editor-sceneline {
+  position: fixed;
+  left: 0;
+  right: 0;
+  bottom: calc(var(--timeline-live-height, 0px) + env(safe-area-inset-bottom, 0px));
+  height: 168px;
+  z-index: 460;
+  display: flex;
+  flex-direction: column;
+  background: var(--bg-panel-elevated, rgba(255,255,255,0.98));
+  border-top: 1px solid var(--border-strong, rgba(20,20,20,0.16));
+  box-shadow: 0 -4px 16px rgba(0,0,0,0.12);
+  user-select: none;
+  -webkit-user-select: none;
+}
+.sl-head {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-height: 40px;
+  padding: 0 4px 0 calc(var(--sl-anchor, 14px) + 70px);
+}
+.sl-title {
+  flex: 1;
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--text-secondary);
+}
+.sl-total {
+  flex: 1;
+  min-width: 0;
+  font-size: 10px;
+  line-height: 1.3;
+  color: var(--text-secondary);
+}
+.sl-close {
+  background: none;
+  border: none;
+  min-width: 44px;
+  min-height: 40px;
+  font-size: 16px;
+  color: var(--text-secondary);
+  -webkit-tap-highlight-color: transparent;
+}
+.sl-scroll {
+  position: relative;
+  flex: 1;
+  overflow: hidden;
+  touch-action: none;
+  -webkit-tap-highlight-color: transparent;
+}
+.sl-content {
+  position: relative;
+  height: 100%;
+}
+.sl-ruler {
+  position: relative;
+  height: 22px;
+}
+.sl-tick {
+  position: absolute;
+  bottom: 0;
+  width: 1px;
+  height: 8px;
+  background: var(--text-secondary, #777);
+  opacity: 0.7;
+}
+.sl-tick i {
+  position: absolute;
+  bottom: 10px;
+  left: 3px;
+  font-style: normal;
+  font-size: 10px;
+  line-height: 1;
+  white-space: nowrap;
+  color: var(--text-secondary, #777);
+}
+.sl-tick-minor {
+  height: 4px;
+  opacity: 0.4;
+}
+.sl-track {
+  position: relative;
+  height: 64px;
+  margin-top: 8px;
+}
+.sl-block {
+  position: absolute;
+  top: 0;
+  height: 100%;
+  box-sizing: border-box;
+  padding: 6px 8px;
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+  overflow: hidden;
+  border-radius: 8px;
+  color: #fff;
+  /* Warna blok Scene mengikuti tema (bukan warna acak/hijau yang mirip tanda seleksi). */
+  background: var(--bg-panel-soft, #8a7a72);
+  background: color-mix(in srgb, var(--accent, #8a7a72) 38%, var(--bg-panel-elevated, #f4f1ee));
+  border: 1px solid color-mix(in srgb, var(--accent, #8a7a72) 45%, transparent);
+}
+.sl-block-name {
+  font-size: 12px;
+  font-weight: 700;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.sl-block-dur {
+  font-size: 10px;
+  opacity: 0.85;
+  white-space: nowrap;
+}
+.sl-joint {
+  position: absolute;
+  top: -2px;
+  height: calc(100% + 4px);
+  width: 3px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  pointer-events: none;
+}
+.sl-joint::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  border-radius: 2px;
+  background: var(--bg-panel-elevated, #fff);
+}
+.sl-joint i {
+  position: relative;
+  width: 9px;
+  height: 9px;
+  border-radius: 50%;
+  background: var(--bg-panel-elevated, #fff);
+  border: 2px solid var(--text-secondary, #777);
+  box-sizing: border-box;
+}
+.sl-playhead {
+  position: absolute;
+  left: var(--sl-anchor, 14px);
+  top: 40px;
+  bottom: 6px;
+  width: 2px;
+  margin-left: -1px;
+  background: var(--accent, #4aa3e0);
+  border-radius: 1px;
+  pointer-events: none;
+}
+.sl-time {
+  position: absolute;
+  left: calc(var(--sl-anchor, 14px) - 1px);
+  top: 22px;
+  transform: none;
+  padding: 1px 8px;
+  border-radius: 999px;
+  font-size: 11px;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  color: #fff;
+  background: var(--accent, #4aa3e0);
+  pointer-events: none;
+}
+.sl-empty {
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: 78px;
+  text-align: center;
+  font-size: 12px;
+  color: var(--text-secondary);
+  pointer-events: none;
+  display: none;
+}
+
+/* ===== Langkah 2: rentang pilihan + pegangan ===== */
+.sl-block.sl-dim {
+  opacity: 0.5;
+}
+.sl-sel {
+  position: absolute;
+  top: -4px;
+  height: calc(100% + 8px);
+  box-sizing: border-box;
+  border: 2px solid var(--accent, #4aa3e0);
+  border-radius: 6px;
+  background: rgba(74, 163, 224, 0.2);
+  pointer-events: none;
+  z-index: 3;
+}
+.sl-handle {
+  position: absolute;
+  top: -6px;
+  bottom: -6px;
+  width: 22px;
+  pointer-events: auto;
+  touch-action: none;
+  cursor: ew-resize;
+  -webkit-tap-highlight-color: transparent;
+}
+.sl-handle i {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  width: 12px;
+  background: var(--accent, #4aa3e0);
+  border: 2px solid #fff;
+  border-radius: 6px;
+  box-sizing: border-box;
+  box-shadow: 0 1px 4px rgba(0,0,0,0.3);
+}
+.sl-handle i::after {
+  content: "";
+  position: absolute;
+  left: 50%;
+  top: 30%;
+  bottom: 30%;
+  width: 2px;
+  margin-left: -1px;
+  border-radius: 1px;
+  background: #fff;
+}
+.sl-handle-l {
+  left: -12px;
+}
+.sl-handle-l i {
+  left: 5px;
+}
+.sl-handle-r {
+  right: -16px;
+}
+.sl-handle-r i {
+  left: 1px;
+}
+
+/* ===== Langkah 3: menu edit + Urungkan ===== */
+.sl-menu,
+.sl-toast {
+  position: fixed;
+  left: 50%;
+  transform: translateX(-50%);
+  bottom: calc(var(--timeline-live-height, 0px) + env(safe-area-inset-bottom, 0px) + 178px);
+  z-index: 461;
+  display: none;
+  align-items: center;
+  gap: 4px;
+  padding: 4px;
+  border-radius: 999px;
+  background: var(--bg-panel-elevated, rgba(255,255,255,0.98));
+  border: 1px solid var(--border-strong, rgba(20,20,20,0.16));
+  box-shadow: 0 2px 10px rgba(0,0,0,0.18);
+}
+.sl-menu-btn,
+.sl-toast-undo {
+  background: none;
+  border: none;
+  min-height: 40px;
+  padding: 8px 18px;
+  border-radius: 999px;
+  font-size: 14px;
+  font-weight: 700;
+  color: var(--text-secondary, #666);
+  -webkit-tap-highlight-color: transparent;
+}
+.sl-menu-del {
+  color: #d94a4a;
+}
+.sl-toast {
+  padding: 4px 4px 4px 16px;
+}
+.sl-toast-text {
+  font-size: 13px;
+  color: var(--text-primary, #222);
+  white-space: nowrap;
+}
+.sl-toast-undo {
+  color: var(--accent, #4aa3e0);
+}
+.editor-page[data-seq-edit] .sl-menu,
+.editor-page[data-seq-use] .sl-menu,
+.editor-page[data-seq-edit] .sl-toast,
+.editor-page[data-seq-use] .sl-toast {
+  display: none !important;
+}
+
+/* Tombol-tombol Scene naik waktu Timeline dibuka */
+.editor-page[data-seq-edit] #editor-sceneline,
+.editor-page[data-seq-use] #editor-sceneline {
+  display: none;
+}
+
+/* Langkah 4: 4 tombol di menu, padding dirapatkan supaya muat di HP */
+.sl-menu .sl-menu-btn {
+  padding: 8px 12px;
+  font-size: 13px;
+}
+/* Langkah 5: pilihan kecepatan (satu pil, sama gayanya dengan menu edit) */
+.sl-speed {
+  position: fixed;
+  left: 50%;
+  transform: translateX(-50%);
+  bottom: calc(var(--timeline-live-height, 0px) + env(safe-area-inset-bottom, 0px) + 178px);
+  z-index: 461;
+  display: none;
+  align-items: center;
+  gap: 2px;
+  padding: 4px;
+  border-radius: 999px;
+  background: var(--bg-panel-elevated, rgba(255,255,255,0.98));
+  border: 1px solid var(--border-strong, rgba(20,20,20,0.16));
+  box-shadow: 0 2px 10px rgba(0,0,0,0.18);
+}
+.editor-page[data-seq-edit] .sl-speed,
+.editor-page[data-seq-use] .sl-speed {
+  display: none !important;
+}
+.sl-menu .sl-menu-btn,
+.sl-speed .sl-menu-btn {
+  padding: 8px 10px;
+  font-size: 13px;
+}
+.sl-speed-btn.sl-on {
+  color: var(--accent, #3b82f6);
+  background: rgba(59,130,246,0.12);
+}
+/* Langkah 6: pindah blok, satukan Scene, Putar semua */
+.sl-menu {
+  flex-wrap: wrap;
+  justify-content: center;
+  max-width: calc(100vw - 16px);
+  border-radius: 20px;
+}
+.sl-pill {
+  position: fixed;
+  left: 50%;
+  transform: translateX(-50%);
+  bottom: calc(var(--timeline-live-height, 0px) + env(safe-area-inset-bottom, 0px) + 178px);
+  z-index: 461;
+  display: none;
+  align-items: center;
+  gap: 2px;
+  padding: 4px;
+  border-radius: 999px;
+  background: var(--bg-panel-elevated, rgba(255,255,255,0.98));
+  border: 1px solid var(--border-strong, rgba(20,20,20,0.16));
+  box-shadow: 0 2px 10px rgba(0,0,0,0.18);
+}
+.editor-page[data-seq-edit] .sl-pill,
+.editor-page[data-seq-use] .sl-pill {
+  display: none !important;
+}
+.sl-pill .sl-menu-btn {
+  padding: 8px 10px;
+  font-size: 13px;
+}
+.sl-pill-text {
+  padding: 0 6px 0 12px;
+  font-size: 13px;
+  color: var(--text-primary, #222);
+  white-space: nowrap;
+}
+.sl-menu-btn:disabled {
+  opacity: 0.35;
+}
+.sl-joint {
+  pointer-events: auto;
+}
+.sl-joint::after {
+  content: "";
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: -12px;
+  right: -12px;
+}
+.sl-joint-on i {
+  background: var(--accent, #3b82f6);
+  border-color: var(--accent, #3b82f6);
+  transform: scale(1.4);
+}
+.sl-playall {
+  background: none;
+  border: none;
+  min-height: 40px;
+  padding: 0 10px;
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--accent, #3b82f6);
+  -webkit-tap-highlight-color: transparent;
+}
+.sl-playall.sl-on {
+  color: #d94a4a;
+}
+/* Fase F langkah 4: daftar jalur "Edit isi" (kolom, bisa digulir kalau banyak) */
+.sl-p-trk {
+  flex-direction: column;
+  align-items: stretch;
+  gap: 2px;
+  max-height: 40vh;
+  overflow-y: auto;
+  max-width: calc(100vw - 16px);
+  border-radius: 16px;
+}
+.sl-p-trk .sl-pill-text {
+  padding: 6px 12px 2px;
+}
+.sl-p-trk .sl-menu-btn {
+  text-align: left;
+}
+/* Fase F langkah 5: panel Reposisi */
+.sl-p-pos {
+  flex-direction: column;
+  align-items: stretch;
+  gap: 2px;
+  max-height: 46vh;
+  overflow-y: auto;
+  max-width: calc(100vw - 16px);
+  border-radius: 16px;
+}
+.sl-p-pos .sl-pill-text {
+  padding: 6px 12px 2px;
+}
+.sl-p-pos .sl-menu-btn {
+  text-align: left;
+}
+.sl-pos-row {
+  display: flex;
+  gap: 4px;
+  justify-content: center;
+}
+.sl-pos-row .sl-menu-btn {
+  text-align: center;
+  min-width: 48px;
+}
+.sl-trk-btn.sl-on {
+  color: var(--accent, #3b82f6);
+  background: rgba(59, 130, 246, 0.12);
+}
+/* Undo/Redo timeline Scene */
+.sl-hist {
+  background: none;
+  border: none;
+  min-height: 40px;
+  min-width: 36px;
+  padding: 0 6px;
+  font-size: 18px;
+  font-weight: 700;
+  color: var(--accent, #3b82f6);
+  -webkit-tap-highlight-color: transparent;
+}
+.sl-hist:disabled {
+  opacity: 0.3;
+}
+/* ===== Audio: tombol ♪ + baris gelombang suara di bawah timeline Scene ===== */
+.sl-haudio {
+  min-width: 32px;
+  padding: 0 4px;
+}
+.sl-haudio svg {
+  display: block;
+  width: 18px;
+  height: 18px;
+  margin: 0 auto;
+}
+.sl-audio {
+  position: relative;
+  margin-top: 6px;
+  height: var(--sl-arow, 26px);
+  /* garis/jalur audio: tiap baris diberi latar tipis */
+  background-image: repeating-linear-gradient(
+    to bottom,
+    rgba(128, 128, 128, 0.14) 0,
+   rgba(128, 128, 128, 0.14) var(--sl-arow, 26px),
+    transparent var(--sl-arow, 26px),
+    transparent 30px
+  );
+}
+.sl-audio-hint {
+  position: absolute;
+  left: calc(var(--sl-pad, 14px) + 6px);
+  top: 0;
+  line-height: 26px;
+  font-size: 10px;
+  white-space: nowrap;
+  color: var(--text-secondary, #777);
+  pointer-events: none;
+  display: none;
+}
+.sl-aclip {
+  position: absolute;
+height: var(--sl-arow, 26px);
+  box-sizing: border-box;
+  border-radius: 7px;
+  overflow: hidden;
+  touch-action: none;
+  cursor: grab;
+  z-index: 2;
+  background: hsl(var(--sl-ahue, 150), 42%, 38%);
+  border: 1px solid hsla(var(--sl-ahue, 150), 42%, 24%, 0.7);
+  -webkit-tap-highlight-color: transparent;
+}
+.sl-aclip.sl-amuted {
+  opacity: 0.55;
+}
+.sl-awave {
+  position: absolute;
+  top: 0;
+  height: 100%;
+  pointer-events: none;
+}
+.sl-aname {
+  position: absolute;
+  left: 20px;
+  right: 44px;
+  top: 0;
+ line-height: calc(var(--sl-arow, 26px) - 2px);
+  font-size: 10px;
+  font-weight: 700;
+  color: #fff;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  pointer-events: none;
+  text-shadow: 0 1px 2px rgba(0, 0, 0, 0.55);
+}
+.sl-adel {
+  position: absolute;
+  right: 20px;
+  top: 2px;
+  width: 20px;
+  height: 20px;
+  padding: 0;
+  border: none;
+  border-radius: 50%;
+  font-size: 10px;
+  line-height: 20px;
+  color: #fff;
+  background: rgba(0, 0, 0, 0.35);
+  -webkit-tap-highlight-color: transparent;
+}
+.sl-atrim {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  width: 18px;
+  z-index: 3;
+  touch-action: none;
+  cursor: ew-resize;
+}
+.sl-atrim-l { left: 0; }
+.sl-atrim-r { right: 0; }
+.sl-atrim i {
+  position: absolute;
+  top: 5px;
+  bottom: 5px;
+  left: 7px;
+  width: 4px;
+  border-radius: 2px;
+  background: #fff;
+  opacity: 0.9;
+}
+/* Klip pendek: sembunyikan nama & tombol hapus; sangat pendek: pegangan juga (zoom dulu) */
+.sl-aclip.sl-anarrow .sl-aname,
+.sl-aclip.sl-anarrow .sl-adel {
+  display: none;
+}
+.sl-aclip.sl-atiny .sl-atrim {
+  display: none;
+}
+/* ===== Mode Audio: kanvas mengecil jadi preview, tool gambar disembunyikan ===== */
+.sl-adone {
+  background: var(--accent, #3b82f6);
+  color: #fff;
+  border: none;
+  border-radius: 999px;
+  min-height: 28px;
+  padding: 0 12px;
+  font-size: 12px;
+  font-weight: 700;
+  -webkit-tap-highlight-color: transparent;
+}
+body.sl-audio-mode #editor-toolbar,
+body.sl-audio-mode .editor-canvas-floating-actions,
+body.sl-audio-mode #editor-layerpanel,
+body.sl-audio-mode #editor-meshpanel,
+body.sl-audio-mode #editor-meshtransformpanel,
+body.sl-audio-mode #editor-colorpanel,
+body.sl-audio-mode #editor-historypanel,
+body.sl-audio-mode #editor-sequencepanel,
+body.sl-audio-mode #brushsize-popover,
+body.sl-audio-mode #stabilizer-popover,
+body.sl-audio-mode #zoom-reset-btn,
+body.sl-audio-mode #theme-switch-btn {
+  display: none !important;
+}
+/* Di Mode Audio kanvas cuma preview: gak bisa kegores gak sengaja */
+body.sl-audio-mode .editor-canvas-wrapper {
+  pointer-events: none;
+}
+/* Tombol Scene / Rekam / Sequence disembunyikan, sisa tombol putar saja */
+#scene-drawer.sd-audio .scene-list-btn,
+#scene-drawer.sd-audio .scene-rec-btn,
+#scene-drawer.sd-audio .seq-open-btn {
+  display: none !important;
+}
+/* ===== Revisi layout Mode Audio ===== */
+/* Timeline selebar layar (mulai dari ujung kiri), tombol putar turun ke bawah tengah */
+#scene-drawer.sd-audio .sd-body {
+  flex-direction: column;
+  gap: 6px;
+}
+#scene-drawer.sd-audio .sd-right {
+  order: 1;
+  width: 100%;
+}
+/* Baris bawah: [kecepatan] [tombol putar - tepat di tengah] [ON/OFF tahan-rekam] */
+#scene-drawer.sd-audio .sd-left {
+  order: 2;
+  width: 100%;
+  display: grid;
+  grid-template-columns: 1fr 160px 1fr;
+  column-gap: 8px;
+  align-items: center;
+}
+#scene-drawer.sd-audio .sd-mini {
+  display: contents;
+}
+#scene-drawer.sd-audio .sd-transport {
+  grid-column: 2;
+  grid-row: 1;
+  flex: none;
+  width: 160px;
+  box-sizing: border-box;
+}
+#scene-drawer.sd-audio .scene-rate-btn:not(.scene-hold-btn) {
+  grid-column: 1;
+  grid-row: 1;
+  justify-self: end;
+  padding: 6px 10px;
+  font-size: 12px;
+}
+#scene-drawer.sd-audio .scene-hold-btn {
+  grid-column: 3;
+  grid-row: 1;
+  justify-self: start;
+  padding: 6px 10px;
+  font-size: 12px;
+}
+
+/* Kepala timeline: musik di kiri, Selesai di tengah, undo/redo di kanan */
+body.sl-audio-mode .sl-head {
+  position: relative;
+  padding-left: calc(var(--sl-anchor, 14px) - 6px);
+  margin-bottom: 26px; /* ruang buat pil waktu supaya gak nabrak tombol musik */
+}
+body.sl-audio-mode .sl-haudio {
+  order: -1;
+}
+body.sl-audio-mode .sl-adone {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  transform: translate(-50%, -50%);
+}
+/* Penggaris, playhead, dan pil waktu ikut turun 26px */
+body.sl-audio-mode #editor-sceneline .sl-playhead {
+  top: 66px;
+}
+body.sl-audio-mode #editor-sceneline .sl-time {
+  top: 48px;
+}
+/* ===== Garis audio ringkas (di luar Mode Audio): 1 gelombang gabungan, tanpa blok ===== */
+.sl-audio.sl-asummary {
+  background-image: none;
+}
+.sl-audio.sl-asummary .sl-aclip {
+  display: none;
+}
+.sl-asum {
+  display: none;
+  position: absolute;
+  left: 0;
+  top: 0;
+}
+.sl-audio.sl-asummary .sl-asum {
+  display: block;
+}
+/* ===== Strip gambar canvas di dalam blok Scene (scenethumb.js) ===== */
+.sl-block {
+  border: none;
+  border-radius: 0;
+}
+.sl-block.sl-first { border-radius: 8px 0 0 8px; }
+.sl-block.sl-last { border-radius: 0 8px 8px 0; }
+.sl-block.sl-first.sl-last { border-radius: 8px; }
+.sl-thumbs {
+  position: absolute;
+  inset: 0;
+  z-index: 0;
+  pointer-events: none;
+}
+.sl-thumb {
+  position: absolute;
+  top: 0;
+  height: 100%;
+  display: block;
+}
+.sl-block::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  z-index: 1;
+  pointer-events: none;
+  background: linear-gradient(to bottom, rgba(0,0,0,0.42), rgba(0,0,0,0) 38%, rgba(0,0,0,0) 62%, rgba(0,0,0,0.42));
+}
+.sl-block-name,
+.sl-block-dur {
+  position: relative;
+  z-index: 2;
+  text-shadow: 0 1px 2px rgba(0,0,0,0.75);
+}
+/* Tombol X hapus Scene di pojok kanan atas blok */
+.sl-block-x {
+  position: absolute;
+  top: 3px;
+  right: 3px;
+  z-index: 2;
+  width: 18px;
+  height: 18px;
+  padding: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border: none;
+  border-radius: 50%;
+  background: rgba(0, 0, 0, 0.45);
+  color: #fff;
+  font-size: 13px;
+  line-height: 1;
+  cursor: pointer;
+  touch-action: manipulation;
+  -webkit-tap-highlight-color: transparent;
+}
+.sl-block-x:active {
+  background: rgba(220, 38, 38, 0.9);
+}
+body.sl-audio-mode .sl-block-x {
+  display: none;
+}
+/* ===== Tanda edit di blok Scene (warna transparan, mirip seleksi) ===== */
+.sl-block.sl-mk-speed::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  z-index: 1;
+  pointer-events: none;
+  background: rgba(34, 197, 94, 0.15);   /* hijau = Kecepatan */
+}
+
+/* ==== Menu edit Scene: tombol berikon ==== */
+.sl-menu .sl-menu-btn.sl-ic-btn {
+  width: 44px;
+  min-height: 44px;
+  height: 44px;
+  padding: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.sl-mic { width: 22px; height: 22px; flex: none; }
+
+/*
+  SCENEDRAWER.CSS -- FILE BARU (Mode Scene, laci bawah)
+  Cuma berlaku di Mode Scene. Mode Keyframe gak tersentuh.
+*/
+
+/* Laci timeline keyframe lama gak dipakai di Mode Scene. */
+.editor-page[data-app-mode="scene"] #editor-timeline {
+  display: none;
+}
+.editor-page[data-app-mode="scene"] .appmode-chip {
+  display: none;
+}
+
+/* Tinggi laci Scene dipakai kanvas & panel melayang. */
+.editor-page[data-app-mode="scene"] {
+  --timeline-live-height: var(--sd-h, 0px);
+  --sceneline-h: 0px !important; /* Timeline Scene sudah di dalam laci */
+}
+
+#scene-drawer {
+  position: fixed;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  z-index: 440;
+  padding-bottom: env(safe-area-inset-bottom, 0px);
+  background: var(--bg-panel-elevated, rgba(255,255,255,0.98));
+  border-top: 1px solid var(--border-strong, rgba(20,20,20,0.16));
+  box-shadow: 0 -4px 16px rgba(0,0,0,0.12);
+}
+.sd-handle {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  width: 100%;
+ min-height: 30px;
+  padding: 0;
+  background: none;
+  border: none;
+  color: var(--text-secondary, #666);
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  -webkit-tap-highlight-color: transparent;
+}
+.sd-handle svg {
+  width: 18px;
+  height: 18px;
+  transition: transform 0.2s;
+  transform: rotate(180deg);
+}
+#scene-drawer.sd-collapsed .sd-handle svg {
+  transform: none;
+}
+
+/* Tombol putar ala FlipaClip: [langkah mundur] [putar semua] [langkah maju] */
+.sd-transport {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 2px;
+  width: 100%;
+  height: 36px;
+  padding: 0 2px;
+  border: 1px solid var(--accent, #4aa3e0);
+  border-radius: 999px;
+  background: var(--bg-panel-elevated, rgba(255,255,255,0.97));
+}
+.sd-tp {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex: 1;
+  height: 100%;
+  padding: 0;
+  border: none;
+  background: none;
+  color: var(--accent, #4aa3e0);
+  -webkit-tap-highlight-color: transparent;
+}
+.sd-tp svg {
+  width: 22px;
+  height: 22px;
+}
+.sd-tp:active {
+  opacity: 0.6;
+}
+.sd-tp:disabled {
+  opacity: 0.4;
+}
+.sd-play .ic-stop {
+  display: none;
+}
+.sd-play.sd-playing .ic-play {
+  display: none;
+}
+.sd-play.sd-playing .ic-stop {
+  display: block;
+}
+#scene-drawer.sd-rec .sd-transport {
+  display: none;
+}
+
+.sd-body {
+  display: flex;
+  gap: 8px;
+  padding: 2px 8px 8px;
+}
+#scene-drawer.sd-collapsed .sd-body {
+  display: none;
+}
+.sd-left {
+  display: flex;
+  flex-direction: column;
+  flex-wrap: nowrap;
+  flex: none;
+  width: 108px;
+  gap: 6px;
+  justify-content: center;
+}
+.sd-right {
+  display: none;
+  flex: 1;
+  min-width: 0;
+}
+
+/* Ada Timeline Scene: tombol numpuk di kiri, timeline di kanan */
+#scene-drawer.sd-has-line .sd-right {
+  display: block;
+}
+
+/* Tombol lama dipindah ke dalam laci: gak melayang lagi */
+#scene-drawer .scene-rec-btn,
+#scene-drawer .scene-list-btn,
+#scene-drawer .seq-open-btn {
+  position: static;
+  left: auto;
+  bottom: auto;
+  min-width: 0;
+  min-height: 40px;
+  padding: 8px 12px;
+  font-size: 13px;
+  white-space: nowrap;
+}
+#scene-drawer .scene-rec-btn,
+#scene-drawer .scene-list-btn,
+#scene-drawer .seq-open-btn {
+  width: 100%;
+  min-height: 36px;
+  padding: 6px 12px;
+}
+
+/* Timeline Scene di dalam laci: gak fixed lagi */
+#scene-drawer #editor-sceneline {
+  position: relative;
+  left: auto;
+  right: auto;
+  bottom: auto;
+  width: 100%;
+  height: 168px;
+  border-top: none;
+  box-shadow: none;
+  border-radius: 10px;
+  overflow: hidden;
+}
+
+/* Lagi merekam: laci jadi bar tipis (cuma tombol Stop + waktu) */
+#scene-drawer.sd-rec .sd-body {
+  display: flex;
+}
+#scene-drawer.sd-rec .sd-right,
+#scene-drawer.sd-rec .scene-list-btn,
+#scene-drawer.sd-rec .seq-open-btn {
+  display: none !important;
+}
+#scene-drawer.sd-rec .sd-left {
+  flex-direction: row;
+  width: 100%;
+}
+#scene-drawer.sd-rec .scene-rec-btn {
+  width: 100%;
+}
+
+/* Panel & menu yang melayang: tepat di atas laci (bukan di atas timeline lama) */
+.editor-page[data-app-mode="scene"] #editor-scenepanel {
+  bottom: calc(var(--timeline-live-height, 0px) + 8px);
+}
+.editor-page[data-app-mode="scene"] .sl-menu,
+.editor-page[data-app-mode="scene"] .sl-speed,
+.editor-page[data-app-mode="scene"] .sl-pill {
+  bottom: calc(var(--timeline-live-height, 0px) + 8px);
+}
+
+/* Lagi edit/pakai Sequence: laci ikut disembunyikan (seperti tombol lamanya) */
+.editor-page[data-seq-edit] #scene-drawer,
+.editor-page[data-seq-use] #scene-drawer {
+  display: none;
+}
+/* Panel Sequence: judulnya bisa ditarik buat geser panel */
+.editor-page[data-app-mode="scene"] .seqp-header {
+  touch-action: none;
+  cursor: grab;
+  -webkit-user-select: none;
+  user-select: none;
+}
+.editor-page[data-app-mode="scene"] .seqp-header > span::before {
+  content: "⠿ ";
+  opacity: 0.5;
+}
+/* Tombol Jeda/Lanjut selagi merekam */
+.scene-pause-btn {
+  position: fixed;
+  left: 14px;
+  bottom: calc(var(--timeline-live-height, 0px) + var(--sceneline-h, 0px) + env(safe-area-inset-bottom, 0px) + 84px);
+  min-height: 44px;
+  padding: 10px 18px;
+  border-radius: 999px;
+  font-size: 14px;
+  font-weight: 700;
+  white-space: nowrap;
+  cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+  user-select: none;
+  -webkit-user-select: none;
+  z-index: 450;
+  color: var(--accent, #4aa3e0);
+  background: var(--bg-panel-elevated, rgba(255,255,255,0.97));
+  border: 1px solid var(--accent, #4aa3e0);
+}
+.scene-pause-btn.scene-pause-on {
+  color: #fff;
+  background: var(--accent, #4aa3e0);
+}
+/* Tombol mode tahan-untuk-rekam */
+.scene-hold-btn { bottom: calc(var(--timeline-live-height, 0px) + var(--sceneline-h, 0px) + env(safe-area-inset-bottom, 0px) + 300px); }
+.scene-hold-btn.on { color: #fff; background: var(--accent, #4aa3e0); }
+/* Tombol kecepatan rekam (muncul saat tidak merekam) */
+.scene-rate-btn {
+  position: fixed;
+  left: 14px;
+  bottom: calc(var(--timeline-live-height, 0px) + var(--sceneline-h, 0px) + env(safe-area-inset-bottom, 0px) + 246px);
+  min-height: 44px;
+  padding: 10px 18px;
+  border-radius: 999px;
+  font-size: 14px;
+  font-weight: 700;
+  white-space: nowrap;
+  cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+  user-select: none;
+  -webkit-user-select: none;
+  z-index: 450;
+  color: var(--accent, #4aa3e0);
+  background: var(--bg-panel-elevated, rgba(255,255,255,0.97));
+  border: 1px solid var(--accent, #4aa3e0);
+}
+#scene-drawer .scene-rate-btn {
+  position: static;
+  left: auto;
+  bottom: auto;
+  flex: 0 0 auto;
+  min-height: 36px;
+  padding: 6px 14px;
+  font-size: 13px;
+}
+/* Ikon garis di dalam tombol */
+.sd-ic { width: 1.2em; height: 1.2em; flex: none; }
+.scene-rec-btn, .scene-rate-btn, .scene-discard-btn, .scene-pause-btn, .scene-list-btn, .seq-open-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+}
+/* Baris kecil di laci: dua tombol berdampingan (kecepatan+tahan, Scene+Sequence) */
+.sd-mini { display: flex; gap: 6px; width: 100%; }
+#scene-drawer .sd-mini .scene-rate-btn,
+#scene-drawer .sd-mini .scene-list-btn,
+#scene-drawer .sd-mini .seq-open-btn {
+  flex: 1 1 0;
+  width: auto;
+  min-width: 0;
+  min-height: 32px;
+  padding: 4px 2px;
+  font-size: 12px;
+}
+#scene-drawer.sd-rec .sd-mini { display: none; }
+/* Tombol Buang rekaman selagi merekam */
+.scene-discard-btn {
+  position: fixed;
+  left: 14px;
+  bottom: calc(var(--timeline-live-height, 0px) + var(--sceneline-h, 0px) + env(safe-area-inset-bottom, 0px) + 30px);
+  min-height: 44px;
+  padding: 10px 18px;
+  border-radius: 999px;
+  font-size: 14px;
+  font-weight: 700;
+  white-space: nowrap;
+  cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+  user-select: none;
+  -webkit-user-select: none;
+  z-index: 450;
+  color: #d94a4a;
+  background: var(--bg-panel-elevated, rgba(255,255,255,0.97));
+  border: 1px solid #d94a4a;
+}
+#scene-drawer .scene-discard-btn {
+  position: static;
+  left: auto;
+  bottom: auto;
+  flex: 0 0 auto;
+  min-height: 36px;
+  padding: 6px 14px;
+  font-size: 13px;
+}
+#scene-drawer .scene-pause-btn {
+  position: static;
+  left: auto;
+  bottom: auto;
+  flex: 0 0 auto;
+  min-height: 36px;
+  padding: 6px 14px;
+  font-size: 13px;
+}
+#scene-drawer.sd-rec .scene-rec-btn {
+  width: auto;
+  flex: 1 1 auto;
+}
+/* Laci Scene terbuka: tombol-tombol melayang di sisi kanan (Reset Zoom, panah toggle,
+   Select/Fullscreen, ganti tema) ngumpet biar gak nutupin timeline & gak ke-tap gak sengaja.
+   Sama kayak perilaku di Mode Keyframe. Muncul lagi saat laci ditutup / lagi merekam. */
+body.sd-open #zoom-reset-btn,
+body.sd-open #ui-visibility-toggle-btn,
+body.sd-open #theme-switch-btn,
+body.sd-open .editor-canvas-floating-actions {
+  opacity: 0;
+  pointer-events: none;
+}
+
+/*
+  ZOOMRESET.CSS -- FILE BARU
+  --------------------------
+  Tombol kecil buat reset zoom/pan canvas. Melayang di pojok kanan
+  bawah, PERSIS DI SEBELAH #theme-switch-btn (lihat thememanager.css --
+  tombol itu di right:12px, width:34px, jadi tombol ini ditaruh di
+  right: 12 + 34 + 8 = 54px biar ada jarak 8px di antara keduanya).
+*/
+
+#zoom-reset-btn {
+  position: fixed;
+  right: 16px;
+  bottom: 112px;
+  width: 34px;
+  height: 34px;
+  border-radius: var(--radius-pill);
+  background: transparent;
+  border: none;
+  color: var(--accent);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  padding: 0;
+  z-index: var(--z-fab-low);
+  filter: drop-shadow(var(--shadow-float));
+  transition: bottom 0.15s ease;
+}
+
+/* FIX (bug baru, revisi lagi -- masih kurang turun): posisi 154px di atas
+   sengaja dikasih jarak biar gak numpuk sama #theme-switch-btn (112px) &
+   tombol "kotak-kotak"/floating-actions selection pas keduanya lagi
+   kebuka. Begitu keduanya ditutup lewat tombol toggle chevron
+   (uivisibility.js nge-set class body.tools-hidden), zoom-reset & tombol
+   toggle-nya sendiri (aturan buat #ui-visibility-toggle-btn ada di bawah)
+   turun BARENG mendekati bar ukuran Brush ("Tirus" dkk, lihat
+   brushsize.css bottom:36px) -- bukan cuma naik 1 slot doang kayak
+   revisi sebelumnya. */
+body.tools-hidden #zoom-reset-btn {
+  bottom: 36px;
+}
+
+body.tools-hidden #ui-visibility-toggle-btn {
+  bottom: 78px !important;
+}
+
+#ui-visibility-toggle-btn {
+  transition: bottom 0.15s ease;
+}
+
+#zoom-reset-btn:active {
+  transform: scale(0.9);
+}
+
+#zoom-reset-btn svg {
+  width: 20px;
+  height: 20px;
+}
+
+/* Sembunyi otomatis saat Timeline drawer dibuka, sama kayak tombol tema. */
+body.timeline-open #zoom-reset-btn {
+  opacity: 0;
+  pointer-events: none;
+}
+
+.demoshare-modal-backdrop {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.5);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: var(--z-modal-dim);
+  padding: var(--space-lg);
+}
+
+.demoshare-modal {
+  background: var(--surface, #fff);
+  border-radius: var(--radius-md);
+  padding: var(--space-lg);
+  width: 100%;
+  max-width: 320px;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-sm);
+}
+
+.demoshare-modal h3 {
+  margin: 0 0 var(--space-sm) 0;
+  font-size: 15px;
+  color: var(--text-primary);
+}
+
+.demoshare-modal input {
+  padding: 10px 12px;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--border-subtle);
+  font-size: 14px;
+  background: var(--bg-elevated, #f5f5f5);
+  color: var(--text-primary);
+}
+
+.demoshare-error {
+  color: var(--danger, #e5484d);
+  font-size: 12px;
+  min-height: 14px;
+  margin: 0;
+}
+
+.demoshare-modal-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: var(--space-sm);
+  margin-top: var(--space-xs);
+}
+
+.demoshare-btn-secondary,
+.demoshare-btn-primary {
+  padding: 8px 16px;
+  border-radius: var(--radius-pill);
+  border: none;
+  font-size: 13px;
+  cursor: pointer;
+}
+
+.demoshare-btn-secondary {
+  background: var(--border-subtle);
+  color: var(--text-primary);
+}
+
+.demoshare-btn-primary {
+  background: var(--accent);
+  color: #fff;
+}
+
+.gallery-demo-card {
+  border-radius: var(--radius-md);
+  overflow: visible;
+  background: var(--bg-elevated, #f5f5f5);
+  display: flex;
+  flex-direction: column;
+}
+
+.gallery-demo-card {
+  cursor: pointer;
+}
+
+.gallery-demo-thumb {
+  position: relative;
+  border-radius: var(--radius-md) var(--radius-md) 0 0;
+  overflow: hidden;
+}
+
+.gallery-demo-thumb img {
+  width: 100%;
+  aspect-ratio: 1 / 1;
+  object-fit: cover;
+  display: block;
+}
+
+.gallery-demo-stats {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  display: flex;
+  gap: 6px;
+  padding: 6px 8px;
+  background: linear-gradient(to top, rgba(0, 0, 0, 0.65), rgba(0, 0, 0, 0));
+}
+
+.gallery-demo-stats span {
+  font-size: 10px;
+  color: #fff;
+  background: rgba(0, 0, 0, 0.4);
+  border-radius: var(--radius-pill);
+  padding: 2px 6px;
+  white-space: nowrap;
+}
+
+.gallery-demo-info {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 4px;
+  padding: var(--space-sm);
+}
+
+.gallery-demo-card-name {
+  font-size: 12px;
+  color: var(--text-primary);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.gallery-demo-menu-delete {
+  color: #e05252;
+}
+
+.gallery-demo-menu-delete:hover {
+  background: #fdeeee;
+}
