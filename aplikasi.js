@@ -17285,7 +17285,7 @@ Modul.extend(MeshPartEngine, "meshpart-warp.js", {
 }, "MeshPartEngine");
 
 /* ======================================================================
-   FILE ASAL: meshpart-capture.js   (303 baris)   [177/489]
+   FILE ASAL: meshpart-capture.js   (322 baris)   [177/489]
    ====================================================================== */
 /*
   meshpart-capture.js
@@ -17526,7 +17526,7 @@ Modul.extend(MeshPartEngine, "meshpart-capture.js", {
     }
     this._freeCanvas(sa); this._freeCanvas(sb);
     if (mxx < 0) { if (e) this._underRecord(e, hPre, this._underHash(cv), null); return; }   // tidak ada yang berubah
-    const fillPad = 0;   // Fill diperlakukan sama dengan brush biasa
+    const fillPad = tool === "fill" ? 24 : 0;   // Fill: baca sedikit lebih luas untuk melihat sisa warna lama di sekitarnya
     const x0 = Math.max(0, mnx * 4 - 4 - fillPad), y0 = Math.max(0, mny * 4 - 4 - fillPad);
     const x1 = Math.min(w, (mxx + 1) * 4 + 4 + fillPad), y1 = Math.min(h, (mxy + 1) * 4 + 4 + fillPad);
     const bw = x1 - x0, bh = y1 - y0;
@@ -17543,9 +17543,27 @@ Modul.extend(MeshPartEngine, "meshpart-capture.js", {
       if (erase) { if (qa < pa - 8) todo.push(i); continue; }
       if (qa === 0) continue;
       const dist = Math.abs(P[o] - Q[o]) + Math.abs(P[o + 1] - Q[o + 1]) + Math.abs(P[o + 2] - Q[o + 2]);
-      if (dist > 8) todo.push(i);
+      if (dist > (tool === "fill" ? 30 : 8)) todo.push(i);
     }
     if (!todo.length) { if (e) this._underRecord(e, hPre, this._underHash(cv), null); return; }   // tidak menimpa apa pun: tidak ada yang perlu disimpan
+    if (tool === "fill") {
+      // Mewarnai ulang satu area utuh: warna lama TIDAK tersisa di sekitarnya -> bukan menimpa benda lain, jangan disimpan.
+      // Menimpa sebagian bulatan (warna lama masih ada di sebelah area isian): simpan, supaya bulatan tetap utuh saat bagian atas digeser.
+      let sr = 0, sg = 0, sb = 0, n = 0;
+      for (let k = 0; k < todo.length; k += 7) { const o = todo[k] * 4; sr += P[o]; sg += P[o + 1]; sb += P[o + 2]; n++; }
+      sr /= n; sg /= n; sb /= n;
+      const mark = new Uint8Array(bw * bh);
+      for (let k = 0; k < todo.length; k++) mark[todo[k]] = 1;
+      let left = 0;
+      for (let i = 0; i < bw * bh; i++) {
+        if (mark[i]) continue;
+        const o = i * 4;
+        if (Q[o + 3] < 200 || P[o + 3] < 200) continue;
+        if (Math.abs(Q[o] - sr) + Math.abs(Q[o + 1] - sg) + Math.abs(Q[o + 2] - sb) <= 40) left++;
+      }
+      if (left < Math.max(60, todo.length * 0.08)) { if (e) this._underRecord(e, hPre, this._underHash(cv), null); return; }
+    }
+
     // 3. perbarui simpanan di kotak itu
     if (!e) {
       if (erase) return;   // menghapus tapi belum ada simpanan: tidak ada yang perlu dibersihkan
@@ -17564,6 +17582,7 @@ Modul.extend(MeshPartEngine, "meshpart-capture.js", {
       const o = todo[k] * 4;
       if (erase) { ud[o + 3] = 0; continue; }
       const pa = P[o + 3] / 255, ua = ud[o + 3] / 255, oa = pa + ua * (1 - pa);
+      if (tool === "fill" && ua > 0.8) continue;   // Fill cuma mengganti warna: kalau di bawahnya sudah ada gambar asli yang tersimpan, jangan ditimpa warna campuran tepi
       if (oa <= 0) continue;
       for (let c = 0; c < 3; c++) ud[o + c] = (P[o + c] * pa + ud[o + c] * ua * (1 - pa)) / oa;
       ud[o + 3] = oa * 255;
