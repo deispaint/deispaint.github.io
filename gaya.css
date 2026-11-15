@@ -4347,7 +4347,7 @@ padding: 10px 16px;
 }
 
 /* ======================================================================
-   FILE ASAL: brushsize.css   (145 baris)   [23/34]
+   FILE ASAL: brushsize.css   (174 baris)   [23/34]
    ====================================================================== */
 /*
   BRUSHSIZE.CSS
@@ -4494,6 +4494,35 @@ padding: 10px 16px;
 .brushfx-title-2 { border-top: 1px solid var(--border-subtle); padding-top: 8px; }
 .brushfx-stab-val { color: var(--text-secondary); }
 .brushfx-popover .brushsize-value { min-width: 14px; }
+
+
+/* Pilihan Oles / Dorong + Kekuatan (tool Smudge, liquify.js) */
+.smudge-mode-row {
+  border-top: 1px solid var(--border-subtle);
+  padding-top: 6px;
+}
+
+.smudge-mode-row .smudge-mode-btn {
+  flex: 1;
+}
+
+.smudge-strength-label {
+  font-size: 12px;
+  color: var(--text-primary);
+}
+
+.smudge-strength-slider {
+  flex: 1;
+  min-width: 0;
+  accent-color: var(--accent);
+}
+
+.smudge-strength-val {
+  font-size: 12px;
+  min-width: 34px;
+  text-align: right;
+  color: var(--text-primary);
+}
 
 /* ======================================================================
    FILE ASAL: colorpanel.css   (521 baris)   [24/34]
