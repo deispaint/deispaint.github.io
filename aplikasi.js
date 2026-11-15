@@ -21514,14 +21514,14 @@ Modul.extend(TopBar, "topbar-escape.js", {
 Modul.extend(TopBar, "topbar-html.js", {
   _topbarHtml(project, toolbarIsBubbleMode) {
     return `      <div class="topbar">
+        <button id="topbar-back" class="topbar-btn" aria-label="Kembali">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M15 5l-7 7 7 7"/></svg>
+        </button>
         ${toolbarIsBubbleMode ? "" : `
         <button id="topbar-more" class="topbar-btn" aria-label="Toggle Toolbar">
           <svg viewBox="0 0 24 24" fill="currentColor"><circle cx="12" cy="5.5" r="1.7"/><circle cx="12" cy="12" r="1.7"/><circle cx="12" cy="18.5" r="1.7"/></svg>
         </button>
         `}
-        <button id="topbar-back" class="topbar-btn" aria-label="Kembali">
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M15 5l-7 7 7 7"/></svg>
-        </button>
         <span class="topbar-title">${this.escapeHtml(project.name)}</span>
         <div class="topbar-actions">
           <button id="topbar-undo" class="topbar-btn" aria-label="Undo" disabled>

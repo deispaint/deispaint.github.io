@@ -1250,7 +1250,7 @@ position: absolute;
 }
 
 /* ======================================================================
-   FILE ASAL: topbar.css   (181 baris)   [6/34]
+   FILE ASAL: topbar.css   (191 baris)   [6/34]
    ====================================================================== */
 /*
   TOPBAR.CSS
@@ -1267,9 +1267,19 @@ position: absolute;
   gap: var(--space-sm);
   padding: 2px var(--space-md) var(--space-sm);
   margin: 2px var(--space-sm) var(--space-sm);
+  padding-left: 0;
   background: transparent;
   border: none;
   box-shadow: none;
+}
+
+/* Tombol Kembali mepet ke pinggir kiri; titik tiga Toolbar tepat di sebelahnya (rapat) */
+#topbar-back {
+  margin-left: -6px;
+}
+
+#topbar-more {
+  margin-left: -6px;
 }
 
 .topbar-title {
