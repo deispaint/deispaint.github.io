@@ -4431,11 +4431,11 @@ Modul.extend(SceneDrawer, "scenedrawer-ctrl.js", {
 }, "SceneDrawer");
 
 /* ======================================================================
-   FILE ASAL: scenedrawer-seqpanel.js   (64 baris)   [41/490]
+   FILE ASAL: scenedrawer-seqpanel.js   (76 baris)   [41/490]
    ====================================================================== */
 /*
   scenedrawer-seqpanel.js
-  TUGAS     : panel Sequence di laci: sembunyi awal, bisa digeser lewat judul, ketuk judul = lipat, posisi diingat
+  TUGAS     : panel Sequence di laci: sembunyi awal, bisa digeser dari bagian mana pun (di daftar: tahan sebentar), ketuk judul = lipat, posisi diingat
   BAGIAN DARI: SceneDrawer
   DIPANGGIL OLEH: scenedrawer-build.js (init)
   MEMANGGIL : localStorage scene.seqPanelPos
@@ -4456,21 +4456,33 @@ Modul.extend(SceneDrawer, "scenedrawer-seqpanel.js", {
     if (sp._sdDrag) return;
     sp._sdDrag = true;
     let drag = null;
+    const PICU = "button, input, select, textarea, a, label, [contenteditable]";
+    const bersih = () => { if (drag && drag.timer) clearTimeout(drag.timer); drag = null; };
     sp.addEventListener("pointerdown", (e) => {
-      const head = e.target.closest && e.target.closest(".seqp-header");
-      if (!head || e.target.closest("button")) return;
+      // Tombol / isian tetap berfungsi normal; selain itu SEMUA bagian panel bisa dipegang buat geser.
+      if (e.target.closest && e.target.closest(PICU)) return;
+      bersih();
+      const head = !!(e.target.closest && e.target.closest(".seqp-header"));
+      // Di daftar (yang bisa di-scroll): tahan sebentar dulu baru geser panel, supaya scroll biasa tetap jalan.
+      const diDaftar = !!(e.target.closest && e.target.closest(".seqp-list"));
       const r = sp.getBoundingClientRect();
-      drag = { id: e.pointerId, dx: e.clientX - r.left, dy: e.clientY - r.top, sx: e.clientX, sy: e.clientY, moved: false };
-      try { head.setPointerCapture(e.pointerId); } catch (err) { /* abaikan */ }
+      drag = { id: e.pointerId, dx: e.clientX - r.left, dy: e.clientY - r.top, sx: e.clientX, sy: e.clientY, moved: false, head, armed: !diDaftar, timer: 0 };
+      if (diDaftar) drag.timer = setTimeout(() => { if (drag) drag.armed = true; }, 350);
     });
     sp.addEventListener("pointermove", (e) => {
       if (!drag || drag.id !== e.pointerId) return;
+      const jauh = Math.hypot(e.clientX - drag.sx, e.clientY - drag.sy);
       // jari goyang dikit (<8px) masih dihitung ketukan, bukan geser
-      if (!drag.moved && Math.hypot(e.clientX - drag.sx, e.clientY - drag.sy) < 8) return;
+      if (!drag.moved && jauh < 8) return;
+      // Di daftar tapi belum ditahan cukup lama = ini scroll biasa, bukan geser panel.
+      if (!drag.armed) { bersih(); return; }
+      if (!drag.moved) { try { sp.setPointerCapture(e.pointerId); } catch (err) { /* abaikan */ } }
       drag.moved = true;
       this._placeSeqPanel(sp, e.clientX - drag.dx, e.clientY - drag.dy);
       e.preventDefault();
     });
+    // Selagi panel digeser, scroll bawaan browser dimatikan.
+    sp.addEventListener("touchmove", (e) => { if (drag && drag.armed && drag.moved && e.cancelable) e.preventDefault(); }, { passive: false });
     const end = (e) => {
       if (!drag || drag.id !== e.pointerId) return;
       if (drag.moved) {
@@ -4478,8 +4490,8 @@ Modul.extend(SceneDrawer, "scenedrawer-seqpanel.js", {
         try { localStorage.setItem("scene.seqPanelPos", JSON.stringify({ x: Math.round(r.left), y: Math.round(r.top) })); } catch (err) { /* abaikan */ }
       }
       // Ketuk judul (tanpa geser) = lipat panel jadi tulisan "Sequence" saja / buka lagi
-      if (!drag.moved && e.type === "pointerup") sp.classList.toggle("seqp-collapsed");
-      drag = null;
+      if (!drag.moved && drag.head && e.type === "pointerup") sp.classList.toggle("seqp-collapsed");
+      bersih();
     };
     sp.addEventListener("pointerup", end);
     sp.addEventListener("pointercancel", end);
@@ -7205,7 +7217,7 @@ Modul.extend(Sequence, "sequence-overlay.js", {
 }, "Sequence");
 
 /* ======================================================================
-   FILE ASAL: sequence-draw.js   (86 baris)   [70/490]
+   FILE ASAL: sequence-draw.js   (87 baris)   [70/490]
    ====================================================================== */
 /*
   sequence-draw.js
@@ -7224,7 +7236,8 @@ Modul.extend(Sequence, "sequence-draw.js", {
     ctx.clearRect(0, 0, cv.width, cv.height);
     if (this._ed) { this._drawOnion(); return; }
     this._clearOnion();
-    if (this._use || (this._showIds.size === 0 && !this._pv)) return;
+    // Saat memilih area (mode Gunakan) gambar Sequence yang sedang tampil TETAP digambar, supaya kelihatan mau ditaruh di mana.
+    if (this._showIds.size === 0 && !this._pv) return;
     const project = ProjectStore.getProject();
     if (!project) return;
     this._calcImgNeed();
@@ -34343,7 +34356,7 @@ Modul.extend(BrushSizeEngine, "brushsize-stabilizer.js", {
 }, "BrushSizeEngine");
 ;
 /* ======================================================================
-   FILE ASAL: liquify.js   (388 baris)   [377/490]
+   FILE ASAL: liquify.js   (659 baris)   [377/490]
    ====================================================================== */
 /*
   liquify.js
@@ -34415,6 +34428,8 @@ Modul.extend(BrushSizeEngine, "brushsize-stabilizer.js", {
         this._liqTmpI = new Int32Array(maxC * maxC);
         this._liqTmpU = new Float32Array(maxC * maxC * 2);
         this._liqDirty = null;
+        // Hanya warna yang pertama disentuh yang bergerak; warna lain diam di tempatnya (null = awal di area kosong: semua ikut, seperti biasa).
+        this._liqSplit(this._liqOrig, W, H, sp.x, sp.y);
         this._liqInterval = 0; this._liqLastRender = 0;
         if (this._liqTimer) { clearTimeout(this._liqTimer); this._liqTimer = null; }
       }
@@ -34425,7 +34440,10 @@ Modul.extend(BrushSizeEngine, "brushsize-stabilizer.js", {
         // Posisi halus dijaga per sisi penggaris; di awal goresan = titik awal jari.
         if (this._liqSmStamp !== this._liqStamp) { this._liqSm = []; this._liqSmStamp = this._liqStamp; }
         const prev = this._liqSm[i] || (this.lastPoints && this.lastPoints[i]) || point;
-        const k = 0.35;
+        // Level Stabilizer (0-10, sama dengan yang di kuas) ikut mengatur kehalusan dorongan: makin tinggi makin tenang / makin tertinggal di belakang jari.
+        // Level 0 = kehalusan bawaan seperti sebelumnya.
+        const lvl = (typeof StabilizerEngine !== "undefined" && StabilizerEngine.level) ? StabilizerEngine.level : 0;
+        const k = this._liqFlushing ? 0.6 : 0.35 / (1 + lvl * 0.2);
         const cur = { x: prev.x + (point.x - prev.x) * k, y: prev.y + (point.y - prev.y) * k };
         this._liqSm[i] = cur;
         this._liqRaw = this._liqRaw || []; this._liqRaw[i] = point;
@@ -34450,6 +34468,7 @@ Modul.extend(BrushSizeEngine, "brushsize-stabilizer.js", {
           const cx = last.x + dx * (s + 0.5) / n;
           const cy = last.y + dy * (s + 0.5) / n;
           this._liquifyStep(cx, cy, rA, rC, rB, skirtAmp, dx / n, dy / n, strength);
+          if (this._liqT) this._liqStampTube(cx, cy, Math.min(rA * 0.85, this._liqTubeMax * 0.95));
         }
       });
       this._liqMaybeRender(ctx);
@@ -34486,11 +34505,210 @@ Modul.extend(BrushSizeEngine, "brushsize-stabilizer.js", {
       if (this._liqTimer) { clearTimeout(this._liqTimer); this._liqTimer = null; }
       // Titik halus masih tertinggal di belakang jari: kejar sampai posisi jari terakhir supaya ujung tidak kurang panjang.
       if (this._liqRaw && this._liqSmStamp === this._strokeStartTime && this._liqCv) {
-        for (let n = 0; n < 10; n++) {
+        this._liqFlushing = true;
+        const ulang = 8;   // langkah kejar dibesarkan (k=0.6) supaya cepat sampai ke tempat jari diangkat
+        for (let n = 0; n < ulang; n++) {
           this.strokeLiquifyMove(this._liqCtx, this._liqRaw.slice(), this._liqCv);
         }
+        this._liqFlushing = false;
       }
       if (this._liqCtx && this._liqDirty && this._liqStamp === this._strokeStartTime) this._liqRender(this._liqCtx);
+    },
+
+    // Pisahkan gambar jadi: OA = hanya area yang tersambung & satu warna dengan titik awal (ini yang bergerak),
+    // B = semua sisanya (diam). Area diperluas 2 piksel supaya pinggiran halus ikut bergerak (tidak tertinggal garis tipis).
+    _liqSplit(O, W, H, x, y) {
+      this._liqOA = null; this._liqB = null; this._liqT = null; this._liqCA = null; this._liqAB = null;
+      let sx = Math.min(W - 1, Math.max(0, Math.round(x))), sy = Math.min(H - 1, Math.max(0, Math.round(y)));
+      // Tap tepat di celah / area kosong = mode campur (semua ikut bergerak, seperti semula). Warna terdekat TIDAK dicari.
+      if (O[(sy * W + sx) * 4 + 3] < 200) return;
+      const N = W * H;
+      const mem = new Uint8Array(N);
+      const st = new Int32Array(N);
+      const s0 = sy * W + sx, o0 = s0 * 4;
+      const ar = O[o0], ag = O[o0 + 1], ab = O[o0 + 2];
+      let sp = 0; st[sp++] = s0; mem[s0] = 1;
+      let cnt = 1;
+      const near = (q, p) => {
+        const oq = q * 4, op = p * 4;
+        if (O[oq + 3] < 128) return false;
+        const dr = Math.abs(O[oq] - O[op]), dg = Math.abs(O[oq + 1] - O[op + 1]), db = Math.abs(O[oq + 2] - O[op + 2]);
+        if (dr > 16 || dg > 16 || db > 16) return false;
+        return Math.abs(O[oq] - ar) <= 70 && Math.abs(O[oq + 1] - ag) <= 70 && Math.abs(O[oq + 2] - ab) <= 70;
+      };
+      let mnx = sx, mxx = sx, mny = sy, mxy = sy;
+      while (sp) {
+        const p = st[--sp];
+        const px = p % W, py = (p / W) | 0;
+        if (px < mnx) mnx = px; if (px > mxx) mxx = px; if (py < mny) mny = py; if (py > mxy) mxy = py;
+        if (px > 0 && !mem[p - 1] && near(p - 1, p)) { mem[p - 1] = 1; st[sp++] = p - 1; cnt++; }
+        if (px < W - 1 && !mem[p + 1] && near(p + 1, p)) { mem[p + 1] = 1; st[sp++] = p + 1; cnt++; }
+        if (py > 0 && !mem[p - W] && near(p - W, p)) { mem[p - W] = 1; st[sp++] = p - W; cnt++; }
+        if (py < H - 1 && !mem[p + W] && near(p + W, p)) { mem[p + W] = 1; st[sp++] = p + W; cnt++; }
+      }
+      if (cnt < 40) return;   // titik tap jatuh di pixel pinggiran/serpihan (bukan warna utuh) -> mode campur
+      // perluas 2 piksel (hanya ke piksel yang ada isinya)
+      const x0 = Math.max(0, mnx - 3), x1 = Math.min(W - 1, mxx + 3), y0 = Math.max(0, mny - 3), y1 = Math.min(H - 1, mxy + 3);
+      for (let pass = 0; pass < 2; pass++) {
+        const add = [];
+        for (let yy = y0; yy <= y1; yy++) {
+          for (let xx = x0; xx <= x1; xx++) {
+            const p = yy * W + xx;
+            if (mem[p] || O[p * 4 + 3] === 0) continue;
+            // Hanya piksel pinggiran buram (setengah tembus) atau yang warnanya lebih dekat ke warna ini daripada warna lain; piksel warna lain (mis. kulit) TIDAK ikut.
+            if (O[p * 4 + 3] >= 250 && (Math.abs(O[p * 4] - ar) > 110 || Math.abs(O[p * 4 + 1] - ag) > 110 || Math.abs(O[p * 4 + 2] - ab) > 110)) continue;
+            if ((xx > 0 && mem[p - 1]) || (xx < W - 1 && mem[p + 1]) || (yy > 0 && mem[p - W]) || (yy < H - 1 && mem[p + W])) add.push(p);
+          }
+        }
+        for (let k = 0; k < add.length; k++) mem[add[k]] = 2;
+      }
+      // Celah / garis terang kecil DI DALAM warna yang disentuh (lebar sampai ~6 piksel, atau lubang tertutup) ikut dianggap
+      // bagian warna itu, supaya celah tersebut tidak terbawa & memanjang jadi garis putih saat digeser. Aslinya tetap diam di tempat (di B).
+      const added = new Uint8Array(N);
+      {
+        const K = 3, ex0 = Math.max(0, x0 - K - 1), ex1 = Math.min(W - 1, x1 + K + 1), ey0 = Math.max(0, y0 - K - 1), ey1 = Math.min(H - 1, y1 + K + 1);
+        const bw = ex1 - ex0 + 1, bh = ey1 - ey0 + 1;
+        let cur = new Uint8Array(bw * bh), nxt = new Uint8Array(bw * bh);
+        for (let yy = 0; yy < bh; yy++) for (let xx = 0; xx < bw; xx++) cur[yy * bw + xx] = mem[(yy + ey0) * W + xx + ex0] ? 1 : 0;
+        const step = (src, dst, dil) => {
+          for (let yy = 0; yy < bh; yy++) {
+            for (let xx = 0; xx < bw; xx++) {
+              const k = yy * bw + xx;
+              const c = src[k], l = xx > 0 ? src[k - 1] : 0, r2 = xx < bw - 1 ? src[k + 1] : 0, u = yy > 0 ? src[k - bw] : 0, d2 = yy < bh - 1 ? src[k + bw] : 0;
+              dst[k] = dil ? (c | l | r2 | u | d2) : (c & l & r2 & u & d2);
+            }
+          }
+        };
+        for (let i = 0; i < K; i++) { step(cur, nxt, true); const t = cur; cur = nxt; nxt = t; }
+        for (let i = 0; i < K; i++) { step(cur, nxt, false); const t = cur; cur = nxt; nxt = t; }
+        for (let yy = 0; yy < bh; yy++) for (let xx = 0; xx < bw; xx++) {
+          if (cur[yy * bw + xx]) { const p = (yy + ey0) * W + xx + ex0; if (!mem[p]) added[p] = 1; }
+        }
+      }
+      // Lubang TERTUTUP kecil di dalam warna itu (kilau / bintik) juga ikut diisi. Lubang besar (mis. wajah di dalam lingkar rambut) tidak.
+      {
+        const maxHole = Math.max(200, 1.5 * this._liqR * this._liqR);
+        const ex0 = Math.max(0, x0 - 2), ex1 = Math.min(W - 1, x1 + 2), ey0 = Math.max(0, y0 - 2), ey1 = Math.min(H - 1, y1 + 2);
+        const inA = (p) => mem[p] !== 0 || added[p] === 1;
+        const seen = new Uint8Array(N);
+        const stk = [];
+        const free = (xx, yy) => xx >= ex0 && xx <= ex1 && yy >= ey0 && yy <= ey1;
+        // 1) tandai semua yang terhubung ke luar kotak (bukan lubang tertutup)
+        for (let xx = ex0; xx <= ex1; xx++) for (const yy of [ey0, ey1]) { const p = yy * W + xx; if (!inA(p) && !seen[p]) { seen[p] = 1; stk.push(p); } }
+        for (let yy = ey0; yy <= ey1; yy++) for (const xx of [ex0, ex1]) { const p = yy * W + xx; if (!inA(p) && !seen[p]) { seen[p] = 1; stk.push(p); } }
+        while (stk.length) {
+          const p = stk.pop(), px = p % W, py = (p / W) | 0;
+          let q;
+          if (px > ex0) { q = p - 1; if (!seen[q] && !inA(q)) { seen[q] = 1; stk.push(q); } }
+          if (px < ex1) { q = p + 1; if (!seen[q] && !inA(q)) { seen[q] = 1; stk.push(q); } }
+          if (py > ey0) { q = p - W; if (!seen[q] && !inA(q)) { seen[q] = 1; stk.push(q); } }
+          if (py < ey1) { q = p + W; if (!seen[q] && !inA(q)) { seen[q] = 1; stk.push(q); } }
+        }
+        // 2) sisanya = lubang tertutup; isi yang kecil saja
+        for (let yy = ey0 + 1; yy < ey1; yy++) {
+          for (let xx = ex0 + 1; xx < ex1; xx++) {
+            const p0 = yy * W + xx;
+            if (seen[p0] || inA(p0)) continue;
+            const comp = [p0]; seen[p0] = 1;
+            for (let i = 0; i < comp.length && comp.length <= maxHole + 1; i++) {
+              const p = comp[i], px = p % W, py = (p / W) | 0;
+              let q;
+              if (px > ex0) { q = p - 1; if (!seen[q] && !inA(q)) { seen[q] = 1; comp.push(q); } }
+              if (px < ex1) { q = p + 1; if (!seen[q] && !inA(q)) { seen[q] = 1; comp.push(q); } }
+              if (py > ey0) { q = p - W; if (!seen[q] && !inA(q)) { seen[q] = 1; comp.push(q); } }
+              if (py < ey1) { q = p + W; if (!seen[q] && !inA(q)) { seen[q] = 1; comp.push(q); } }
+            }
+            if (comp.length <= maxHole) for (let i = 0; i < comp.length; i++) added[comp[i]] = 1;
+          }
+        }
+      }
+      const OA = new Uint8ClampedArray(O.length), B = new Uint8ClampedArray(O);
+      for (let p = 0; p < N; p++) {
+        if (added[p]) { const o = p * 4; OA[o] = ar; OA[o + 1] = ag; OA[o + 2] = ab; OA[o + 3] = 255; }
+      }
+      for (let yy = y0; yy <= y1; yy++) {
+        for (let xx = x0; xx <= x1; xx++) {
+          const p = yy * W + xx;
+          if (!mem[p]) continue;
+          const o = p * 4;
+          if (mem[p] === 2) { OA[o] = ar; OA[o + 1] = ag; OA[o + 2] = ab; OA[o + 3] = O[o + 3]; }
+          else { OA[o] = O[o]; OA[o + 1] = O[o + 1]; OA[o + 2] = O[o + 2]; OA[o + 3] = O[o + 3]; }
+          B[o] = 0; B[o + 1] = 0; B[o + 2] = 0; B[o + 3] = 0;
+        }
+      }
+      // Pinggiran yang tadi ikut diperluas (2 piksel) dikembalikan warna tetangganya, supaya setelah warna itu pergi
+      // tidak tertinggal garis putih tipis di sepanjang tepi lama. Area besar yang ditinggalkan tetap kosong.
+      for (let pass = 0; pass < 3; pass++) {
+        const fill = [];
+        for (let yy = y0; yy <= y1; yy++) {
+          for (let xx = x0; xx <= x1; xx++) {
+            const p = yy * W + xx;
+            if (!mem[p] || B[p * 4 + 3] !== 0) continue;
+            let q = -1;
+            if (xx > 0 && B[(p - 1) * 4 + 3] >= 200) q = p - 1;
+            else if (xx < W - 1 && B[(p + 1) * 4 + 3] >= 200) q = p + 1;
+            else if (yy > 0 && B[(p - W) * 4 + 3] >= 200) q = p - W;
+            else if (yy < H - 1 && B[(p + W) * 4 + 3] >= 200) q = p + W;
+            if (q >= 0) fill.push(p, q);
+          }
+        }
+        for (let k = 0; k < fill.length; k += 2) {
+          const o = fill[k] * 4, oq = fill[k + 1] * 4;
+          B[o] = B[oq]; B[o + 1] = B[oq + 1]; B[o + 2] = B[oq + 2]; B[o + 3] = 255;
+        }
+      }
+      this._liqOA = OA; this._liqB = B;
+      // "Tabung" warna pertama sepanjang jalur jari: menjamin ekor tarikan tidak putus / robek, bagaimanapun jari melengkung.
+      this._liqCA = { r: ar, g: ag, b: ab };
+      this._liqT = new Uint8Array(N);
+      this._liqAB = new Uint8ClampedArray(OA);   // hasil warna-yang-bergerak saja (sebelum ditumpuk di atas warna yang diam)
+// Ketebalan setempat warna yang disentuh (setengah lebar terbesar di sekitar titik awal): tabung tidak boleh lebih tebal dari ini,
+      // jadi untai tipis tetap tipis dan tidak muncul bulatan di pangkal.
+      const R = Math.max(6, Math.ceil(this._liqR)), ww = 2 * R + 1;
+      const dt = new Float32Array(ww * ww);
+      const BIG = 1e6;
+      for (let j = 0; j < ww; j++) {
+        for (let i = 0; i < ww; i++) {
+          const gx = sx - R + i, gy = sy - R + j;
+          const inA = gx >= 0 && gy >= 0 && gx < W && gy < H ? mem[gy * W + gx] !== 0 : false;
+          dt[j * ww + i] = inA ? BIG : 0;
+        }
+      }
+      for (let j = 0; j < ww; j++) for (let i = 0; i < ww; i++) {
+        const k = j * ww + i; let v = dt[k]; if (v === 0) continue;
+        if (i > 0) v = Math.min(v, dt[k - 1] + 1);
+        if (j > 0) { v = Math.min(v, dt[k - ww] + 1); if (i > 0) v = Math.min(v, dt[k - ww - 1] + 1.414); if (i < ww - 1) v = Math.min(v, dt[k - ww + 1] + 1.414); }
+        dt[k] = v;
+      }
+      for (let j = ww - 1; j >= 0; j--) for (let i = ww - 1; i >= 0; i--) {
+        const k = j * ww + i; let v = dt[k]; if (v === 0) continue;
+        if (i < ww - 1) v = Math.min(v, dt[k + 1] + 1);
+        if (j < ww - 1) { v = Math.min(v, dt[k + ww] + 1); if (i < ww - 1) v = Math.min(v, dt[k + ww + 1] + 1.414); if (i > 0) v = Math.min(v, dt[k + ww - 1] + 1.414); }
+        dt[k] = v;
+      }
+      let hS = 1;
+      const lim = this._liqR * 0.6;
+      for (let j = 0; j < ww; j++) for (let i = 0; i < ww; i++) {
+        if (Math.hypot(i - R, j - R) > lim) continue;
+        const v = dt[j * ww + i]; if (v < BIG && v > hS) hS = v;
+      }
+      this._liqTubeMax = hS;
+    },
+
+    _liqStampTube(cx, cy, rad) {
+      const T = this._liqT, W = this._liqCur.width, H = this._liqCur.height;
+      if (!T || rad < 0.5) return;
+      const x0 = Math.max(0, Math.floor(cx - rad - 1)), x1 = Math.min(W - 1, Math.ceil(cx + rad + 1));
+      const y0 = Math.max(0, Math.floor(cy - rad - 1)), y1 = Math.min(H - 1, Math.ceil(cy + rad + 1));
+      for (let y = y0; y <= y1; y++) {
+        for (let x = x0; x <= x1; x++) {
+          let a = (rad - Math.hypot(x - cx, y - cy) + 0.5) * 255;
+          if (a <= 0) continue;
+          if (a > 255) a = 255;
+          const p = y * W + x;
+          if (a > T[p]) T[p] = a;
+        }
+      }
     },
 
     // Ukur sisi terpendek kotak pembungkus gambar yang tersambung di titik awal (alpha > 50%). 0 = tidak ketemu.
@@ -34614,8 +34832,11 @@ Modul.extend(BrushSizeEngine, "brushsize-stabilizer.js", {
       const d = this._liqDirty;
       if (!d || d.i1 < d.i0 || d.j1 < d.j0) return;
       const G = this._liqG, gw = this._liqGW, Ug = this._liqUg, blk = this._liqBlk;
-      const O = this._liqOrig, cur = this._liqCur, D = cur.data, W = cur.width, H = cur.height;
+      const Tb = this._liqT, CAr = this._liqCA ? this._liqCA.r : 0, CAg = this._liqCA ? this._liqCA.g : 0, CAb = this._liqCA ? this._liqCA.b : 0;
+      const O = this._liqOrig, S = this._liqOA || this._liqOrig, Bs = this._liqB, cur = this._liqCur, D = cur.data, W = cur.width, H = cur.height;
       const invG = 1 / G;
+      const AB = this._liqAB;
+      const done = [];
       let minX = 1e9, minY = 1e9, maxX = -1, maxY = -1;
       for (let bj = d.j0; bj <= d.j1; bj++) {
         for (let bi = d.i0; bi <= d.i1; bi++) {
@@ -34626,6 +34847,7 @@ Modul.extend(BrushSizeEngine, "brushsize-stabilizer.js", {
           const x0 = bi * G, y0 = bj * G;
           const x1 = Math.min(W, x0 + G), y1 = Math.min(H, y0 + G);
           if (x0 < minX) minX = x0; if (y0 < minY) minY = y0; if (x1 > maxX) maxX = x1; if (y1 > maxY) maxY = y1;
+          if (Bs) done.push(x0, y0, x1, y1);
           for (let py = y0; py < y1; py++) {
             const fy = (py - y0) * invG;
             for (let px = x0; px < x1; px++) {
@@ -34640,24 +34862,86 @@ Modul.extend(BrushSizeEngine, "brushsize-stabilizer.js", {
               const ay = iy < 0 ? 0 : (iy > H - 1 ? H - 1 : iy), by = iy + 1 < 0 ? 0 : (iy + 1 > H - 1 ? H - 1 : iy + 1);
               const o00 = (ay * W + ax) * 4, o10 = (ay * W + bx) * 4, o01 = (by * W + ax) * 4, o11 = (by * W + bx) * 4;
               const q00 = (1 - tx) * (1 - ty), q10 = tx * (1 - ty), q01 = (1 - tx) * ty, q11 = tx * ty;
-              const a00 = O[o00 + 3], a10 = O[o10 + 3], a01 = O[o01 + 3], a11 = O[o11 + 3];
+              const a00 = S[o00 + 3], a10 = S[o10 + 3], a01 = S[o01 + 3], a11 = S[o11 + 3];
               const o = (py * W + px) * 4;
+              let rr = 0, gg = 0, bb = 0, aa = 0;
               if (a00 === 255 && a10 === 255 && a01 === 255 && a11 === 255) {
                 // Jalur cepat: keempat tetangga buram penuh (kebanyakan piksel di dalam gambar)
-                D[o] = O[o00] * q00 + O[o10] * q10 + O[o01] * q01 + O[o11] * q11;
-                D[o + 1] = O[o00 + 1] * q00 + O[o10 + 1] * q10 + O[o01 + 1] * q01 + O[o11 + 1] * q11;
-                D[o + 2] = O[o00 + 2] * q00 + O[o10 + 2] * q10 + O[o01 + 2] * q01 + O[o11 + 2] * q11;
-                D[o + 3] = 255;
-                continue;
+                rr = S[o00] * q00 + S[o10] * q10 + S[o01] * q01 + S[o11] * q11;
+                gg = S[o00 + 1] * q00 + S[o10 + 1] * q10 + S[o01 + 1] * q01 + S[o11 + 1] * q11;
+                bb = S[o00 + 2] * q00 + S[o10 + 2] * q10 + S[o01 + 2] * q01 + S[o11 + 2] * q11;
+                aa = 255;
+              } else if ((a00 | a10 | a01 | a11) !== 0) {
+                const A = a00 * q00 + a10 * q10 + a01 * q01 + a11 * q11;
+                if (A >= 0.5) {
+                  const m00 = a00 * q00, m10 = a10 * q10, m01 = a01 * q01, m11 = a11 * q11;
+                  rr = (S[o00] * m00 + S[o10] * m10 + S[o01] * m01 + S[o11] * m11) / A;
+                  gg = (S[o00 + 1] * m00 + S[o10 + 1] * m10 + S[o01 + 1] * m01 + S[o11 + 1] * m11) / A;
+                  bb = (S[o00 + 2] * m00 + S[o10 + 2] * m10 + S[o01 + 2] * m01 + S[o11 + 2] * m11) / A;
+                  aa = A;
+                }
               }
-              if ((a00 | a10 | a01 | a11) === 0) { D[o] = 0; D[o + 1] = 0; D[o + 2] = 0; D[o + 3] = 0; continue; }
-              const A = a00 * q00 + a10 * q10 + a01 * q01 + a11 * q11;
-              if (A < 0.5) { D[o] = 0; D[o + 1] = 0; D[o + 2] = 0; D[o + 3] = 0; continue; }
-              const m00 = a00 * q00, m10 = a10 * q10, m01 = a01 * q01, m11 = a11 * q11;
-              D[o] = (O[o00] * m00 + O[o10] * m10 + O[o01] * m01 + O[o11] * m11) / A;
-              D[o + 1] = (O[o00 + 1] * m00 + O[o10 + 1] * m10 + O[o01 + 1] * m01 + O[o11 + 1] * m11) / A;
-              D[o + 2] = (O[o00 + 2] * m00 + O[o10 + 2] * m10 + O[o01 + 2] * m01 + O[o11 + 2] * m11) / A;
-              D[o + 3] = A;
+              if (Tb && aa < 255) {
+                const ta = Tb[py * W + px];
+                if (ta > 0) {
+                  const fa = aa / 255, fb = ta / 255, oa = fa + fb * (1 - fa);
+                  rr = (rr * fa + CAr * fb * (1 - fa)) / oa; gg = (gg * fa + CAg * fb * (1 - fa)) / oa; bb = (bb * fa + CAb * fb * (1 - fa)) / oa;
+                  aa = oa * 255;
+                }
+              }
+              if (!Bs) {
+                if (aa <= 0) { D[o] = 0; D[o + 1] = 0; D[o + 2] = 0; D[o + 3] = 0; }
+                else { D[o] = rr; D[o + 1] = gg; D[o + 2] = bb; D[o + 3] = aa; }
+              } else {
+                AB[o] = rr; AB[o + 1] = gg; AB[o + 2] = bb; AB[o + 3] = aa;
+              }
+            }
+          }
+        }
+      }
+      if (Bs) {
+        // Tahap 2: tutup celah tipis hasil lipatan/robekan (garis terang & titik-titik di dalam warna yang bergerak), lalu tumpuk di atas warna yang diam.
+        const DX = [1, 0, 1, 1], DY = [0, 1, 1, -1];
+        for (let k = 0; k < done.length; k += 4) {
+          const x0 = done[k], y0 = done[k + 1], x1 = done[k + 2], y1 = done[k + 3];
+          for (let py = y0; py < y1; py++) {
+            for (let px = x0; px < x1; px++) {
+              const o = (py * W + px) * 4;
+              let rr = AB[o], gg = AB[o + 1], bb = AB[o + 2], aa = AB[o + 3];
+              if (aa < 250) {
+                for (let m = 0; m < 4; m++) {
+                  let o1 = -1, o2 = -1;
+                  for (let t = 1; t <= 3 && o1 < 0; t++) {
+                    const qx = px + DX[m] * t, qy = py + DY[m] * t;
+                    if (qx < 0 || qy < 0 || qx >= W || qy >= H) break;
+                    const oo = (qy * W + qx) * 4; if (AB[oo + 3] >= 200) o1 = oo;
+                  }
+                  if (o1 < 0) continue;
+                  for (let t = 1; t <= 3 && o2 < 0; t++) {
+                    const qx = px - DX[m] * t, qy = py - DY[m] * t;
+                    if (qx < 0 || qy < 0 || qx >= W || qy >= H) break;
+                    const oo = (qy * W + qx) * 4; if (AB[oo + 3] >= 200) o2 = oo;
+                  }
+                  if (o2 < 0) continue;
+                  rr = (AB[o1] + AB[o2]) / 2; gg = (AB[o1 + 1] + AB[o2 + 1]) / 2; bb = (AB[o1 + 2] + AB[o2 + 2]) / 2; aa = 255;
+                  break;
+                }
+              }
+              if (aa >= 255) { D[o] = rr; D[o + 1] = gg; D[o + 2] = bb; D[o + 3] = 255; continue; }
+              const ba = Bs[o + 3];
+              if (ba >= 128) {
+                // Di atas warna yang diam, tepi buram warna yang bergerak dikeraskan, supaya tidak ada garis putih bolong di sambungan dua tepi.
+                let hf = (aa / 255 - 0.15) / 0.5; hf = hf < 0 ? 0 : (hf > 1 ? 1 : hf); aa = hf * 255;
+              }
+              if (aa <= 0) { D[o] = Bs[o]; D[o + 1] = Bs[o + 1]; D[o + 2] = Bs[o + 2]; D[o + 3] = ba; }
+              else if (ba === 0) { D[o] = rr; D[o + 1] = gg; D[o + 2] = bb; D[o + 3] = aa; }
+              else {
+                const fa = aa / 255, fb = ba / 255, oa = fa + fb * (1 - fa);
+                D[o] = (rr * fa + Bs[o] * fb * (1 - fa)) / oa;
+                D[o + 1] = (gg * fa + Bs[o + 1] * fb * (1 - fa)) / oa;
+                D[o + 2] = (bb * fa + Bs[o + 2] * fb * (1 - fa)) / oa;
+                D[o + 3] = oa * 255;
+              }
             }
           }
         }
@@ -34677,7 +34961,7 @@ Modul.extend(BrushSizeEngine, "brushsize-stabilizer.js", {
     };
   }
 
-// ===== Baris "Oles | Dorong" + "Kekuatan" di popover ukuran, hanya saat tool Smudge aktif =====
+  // ===== Baris "Oles | Dorong" + "Kekuatan" di popover ukuran, hanya saat tool Smudge aktif =====
   if (typeof BrushSizeEngine !== "undefined" && typeof BrushSizeEngine.openPopover === "function") {
     const bukaAsli = BrushSizeEngine.openPopover;
     BrushSizeEngine.openPopover = function (anchorEl) {

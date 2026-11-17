@@ -7168,7 +7168,7 @@ body.sl-audio-mode .sl-block-x {
 .sl-mic { width: 22px; height: 22px; flex: none; }
 
 /* ======================================================================
-   FILE ASAL: scenedrawer.css   (339 baris)   [32/34]
+   FILE ASAL: scenedrawer.css   (346 baris)   [32/34]
    ====================================================================== */
 /*
   SCENEDRAWER.CSS -- FILE BARU (Mode Scene, laci bawah)
@@ -7375,6 +7375,13 @@ body.sl-audio-mode .sl-block-x {
   cursor: grab;
   -webkit-user-select: none;
   user-select: none;
+}
+/* Panel Sequence bisa dipegang & digeser dari bagian mana pun; daftar tetap bisa di-scroll ke atas/bawah */
+.editor-page[data-app-mode="scene"] #editor-sequencepanel {
+  touch-action: none;
+}
+.editor-page[data-app-mode="scene"] #editor-sequencepanel .seqp-list {
+  touch-action: pan-y;
 }
 .editor-page[data-app-mode="scene"] .seqp-header > span::before {
   content: "⠿ ";
