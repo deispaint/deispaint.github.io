@@ -1,12 +1,12 @@
 /*
   aplikasi.js -- seluruh fitur app + editor (dimuat SETELAH library Supabase)
-  Hasil gabungan 490 file asli, urutannya SAMA PERSIS dengan urutan <script> di index.html lama.
+  Hasil gabungan 491 file asli, urutannya SAMA PERSIS dengan urutan <script> di index.html lama.
   Isi tiap file TIDAK diubah; hanya ditambah penanda "FILE ASAL" di atasnya supaya gampang dicari.
   Cari nama file asal (misal: FILE ASAL: canvas.js) untuk lompat ke bagiannya.
 */
 
 /* ======================================================================
-   FILE ASAL: snap.js   (186 baris)   [1/490]
+   FILE ASAL: snap.js   (186 baris)   [1/491]
    ====================================================================== */
 /*
   snap.js
@@ -196,7 +196,7 @@ const SnapEngine = {
 };
 
 /* ======================================================================
-   FILE ASAL: stabilizer.js   (85 baris)   [2/490]
+   FILE ASAL: stabilizer.js   (85 baris)   [2/491]
    ====================================================================== */
 /*
   stabilizer.js
@@ -285,7 +285,7 @@ const StabilizerEngine = {
 };
 
 /* ======================================================================
-   FILE ASAL: gestureaxis.js   (33 baris)   [3/490]
+   FILE ASAL: gestureaxis.js   (33 baris)   [3/491]
    ====================================================================== */
 /*
   gestureaxis.js
@@ -322,7 +322,7 @@ const GestureAxis = {
 };
 
 /* ======================================================================
-   FILE ASAL: shape.js   (147 baris)   [4/490]
+   FILE ASAL: shape.js   (147 baris)   [4/491]
    ====================================================================== */
 /*
   shape.js
@@ -473,7 +473,7 @@ const ShapeEngine = {
 };
 
 /* ======================================================================
-   FILE ASAL: brushcursor.js   (65 baris)   [5/490]
+   FILE ASAL: brushcursor.js   (65 baris)   [5/491]
    ====================================================================== */
 /*
   brushcursor.js
@@ -542,7 +542,191 @@ const BrushCursorEngine = {
 };
 
 /* ======================================================================
-   FILE ASAL: media.js   (119 baris)   [6/490]
+   FILE ASAL: polyline.js   (180 baris)   [6/491]
+   ====================================================================== */
+/*
+  polyline.js
+  TUGAS     : mode "Garis sambung" (Polyline) untuk Kuas: tap titik demi titik, tiap titik tersambung garis lurus; ada centang (simpan), silang (batal); Undo/Redo titik lewat tombol Undo/Redo di atas
+  BAGIAN DARI: mandiri (objek PolylineEngine)
+  DIPANGGIL OLEH: canvas-input-route.js (handlePointerDown/Move/Up), canvas-compose.js (drawOverlay), topbar-bind-history.js (switch di popover Tirus & Stabilisator)
+  MEMANGGIL : ProjectStore (getActiveLayer, updateLayer), CanvasEngine (getPointerPos, toLayerLocalPoint, ensureLayerCanvas, encodeLayerCanvas, compositeAll), HistoryEngine.snapshot, ColorPanel.getRgbaString
+  EVENT     : tidak ada
+  KALAU RUSAK: tap tidak menambah titik / garis tidak tersimpan / bar tombol tidak muncul: cek cabang "brush + PolylineEngine.enabled" di canvas-input-route.js
+*/
+const PolylineEngine = {
+  enabled: false,
+  points: [],      // titik di ruang kanvas (hasil getPointerPos)
+  redoStack: [],
+  _down: null,
+  _bar: null,
+
+  setEnabled(on) {
+    this.enabled = !!on;
+    if (!this.enabled) this.cancel();
+  },
+
+  // ---- sentuhan: hanya ketukan (jari tidak bergeser jauh) yang menambah titik ----
+  handlePointerDown(e) {
+    const p = CanvasEngine.getPointerPos(e);
+    this._down = { x: p.x, y: p.y, moved: false };
+  },
+
+  handlePointerMove(e) {
+    if (!this._down) return;
+    const p = CanvasEngine.getPointerPos(e);
+    if (Math.hypot(p.x - this._down.x, p.y - this._down.y) > 10) this._down.moved = true;
+  },
+
+  handlePointerUp() {
+    const d = this._down;
+    this._down = null;
+    if (!d || d.moved) return;
+    const layer = ProjectStore.getActiveLayer();
+    if (!layer || layer.locked) return;
+    this.points.push({ x: d.x, y: d.y });
+    this.redoStack = [];
+    CanvasEngine.compositeAll();
+    this._btns();
+  },
+
+  // ---- Undo/Redo titik: dipakai tombol Undo/Redo di atas (topbar-bind-history.js, history-buttons.js) ----
+  canUndo() { return this.enabled && CanvasEngine.activeTool === "brush" && this.points.length > 0; },
+  canRedo() { return this.enabled && CanvasEngine.activeTool === "brush" && this.redoStack.length > 0; },
+  _btns() { try { if (typeof HistoryEngine !== "undefined" && HistoryEngine.updateButtons) HistoryEngine.updateButtons(); } catch (err) { /* abaikan */ } },
+
+  undoPoint() {
+    if (!this.points.length) return;
+    this.redoStack.push(this.points.pop());
+    CanvasEngine.compositeAll();
+    this._btns();
+  },
+
+  redoPoint() {
+    if (!this.redoStack.length) return;
+    this.points.push(this.redoStack.pop());
+    CanvasEngine.compositeAll();
+    this._btns();
+  },
+
+  cancel() {
+    this.points = [];
+    this.redoStack = [];
+    this._down = null;
+    this._syncBar();
+    try { CanvasEngine.compositeAll(); } catch (err) { /* abaikan */ }
+    this._btns();
+  },
+
+  // Garis halus melewati semua titik (kurva Catmull-Rom -> bezier), tanpa sudut tajam, seperti Ibis Paint X.
+  // 2 titik = garis lurus.
+  _trace(ctx, pts) {
+    const n = pts.length;
+    ctx.moveTo(pts[0].x, pts[0].y);
+    if (n === 2) { ctx.lineTo(pts[1].x, pts[1].y); return; }
+    for (let i = 0; i < n - 1; i++) {
+      const p0 = pts[i === 0 ? 0 : i - 1], p1 = pts[i], p2 = pts[i + 1], p3 = pts[i + 2 < n ? i + 2 : n - 1];
+      ctx.bezierCurveTo(
+        p1.x + (p2.x - p0.x) / 6, p1.y + (p2.y - p0.y) / 6,
+        p2.x - (p3.x - p1.x) / 6, p2.y - (p3.y - p1.y) / 6,
+        p2.x, p2.y);
+    }
+  },
+
+  async commit() {
+    const pts = this.points.slice();
+    const layer = ProjectStore.getActiveLayer();
+    if (!layer || layer.locked || pts.length < 2) { this.cancel(); return; }
+    this.points = [];
+    this.redoStack = [];
+    this._syncBar();
+
+    if (typeof HistoryEngine !== "undefined") HistoryEngine.snapshot();
+
+    const offCanvas = CanvasEngine.ensureLayerCanvas(layer);
+    const ctx = offCanvas.getContext("2d");
+    const color = (typeof ColorPanel !== "undefined") ? ColorPanel.getRgbaString(ColorPanel.primary) : "#000000";
+    ctx.save();
+    ctx.strokeStyle = color;
+    ctx.lineWidth = (CanvasEngine.brushSize || 6) * (CanvasEngine.layerSizeK ? CanvasEngine.layerSizeK() : 1);
+    ctx.lineCap = "round";
+    ctx.lineJoin = "round";
+    ctx.beginPath();
+    this._trace(ctx, pts.map(p => CanvasEngine.toLayerLocalPoint(p)));
+    ctx.stroke();
+    ctx.restore();
+
+    try { if (typeof MeshPartEngine !== "undefined" && MeshPartEngine._capAfterStroke) MeshPartEngine._capAfterStroke(); } catch (err) { console.error("Mesh- simpan pixel tertimpa gagal:", err); }
+
+    const imageData = await CanvasEngine.encodeLayerCanvas(offCanvas);
+    ProjectStore.updateLayer(layer.id, { imageData });
+    CanvasEngine.compositeAll();
+    this._btns();
+    this._btns();
+  },
+
+  // ---- pratinjau di kanvas ----
+  drawOverlay(ctx) {
+    this._syncBar();
+    if (!this.enabled || CanvasEngine.activeTool !== "brush" || !this.points.length) return;
+    ctx.save();
+    ctx.strokeStyle = (typeof ColorPanel !== "undefined") ? ColorPanel.getRgbaString(ColorPanel.primary) : "#000000";
+    ctx.lineWidth = CanvasEngine.brushSize || 6;
+    ctx.lineCap = "round";
+    ctx.lineJoin = "round";
+    ctx.beginPath();
+    if (this.points.length > 1) this._trace(ctx, this.points);
+    ctx.stroke();
+    // titik penanda (putih berbingkai biru) supaya kelihatan di atas warna apa pun
+    this.points.forEach((p, i) => {
+      ctx.beginPath();
+      ctx.fillStyle = i === this.points.length - 1 ? "#ffd54a" : "#ffffff";
+      ctx.strokeStyle = "#4aa3e0";
+      ctx.lineWidth = 2;
+      ctx.arc(p.x, p.y, 5, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.stroke();
+    });
+    ctx.restore();
+  },
+
+  // ---- bar tombol: Undo titik, Redo titik, Batal (silang), Simpan (centang) ----
+  _syncBar() {
+    const show = this.enabled && this.points.length > 0 && CanvasEngine.activeTool === "brush";
+    if (!show) {
+      if (this._bar) this._bar.style.display = "none";
+      if (!this.enabled || CanvasEngine.activeTool !== "brush") { this.points = this.enabled ? this.points : []; }
+      return;
+    }
+    if (!this._bar) this._buildBar();
+    this._bar.style.display = "flex";
+    this._bar.querySelector('[data-pl="ok"]').disabled = this.points.length < 2;
+  },
+
+  _buildBar() {
+    const bar = document.createElement("div");
+    bar.id = "polyline-bar";
+    bar.style.cssText = "position:fixed;left:50%;bottom:44px;transform:translateX(-50%);z-index:var(--z-toolbar,9000);display:none;gap:6px;padding:4px;border-radius:var(--radius-md,14px);background:var(--bg-panel-elevated,rgba(30,30,34,.92));backdrop-filter:var(--panel-blur,none);box-shadow:var(--shadow-panel,0 4px 14px rgba(0,0,0,.35));touch-action:manipulation;";
+    const mk = (id, label, svg, color, bg, bd) => `<button data-pl="${id}" aria-label="${label}" style="width:32px;height:32px;border:1px solid ${bd};border-radius:var(--radius-sm,8px);background:${bg};color:${color};display:flex;align-items:center;justify-content:center;font-size:0;cursor:pointer">${svg}</button>`;
+    const ic = (d) => `<svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round">${d}</svg>`;
+    bar.innerHTML =
+      mk("no", "Batal", ic('<path d="M6 6l12 12M18 6L6 18"/>'), "var(--text-secondary,#888)", "transparent", "var(--border-subtle,#555)") +
+      mk("ok", "Simpan", ic('<path d="M5 12.5l4.5 4.5L19 7.5"/>'), "#fff", "var(--accent,#4aa3e0)", "var(--accent,#4aa3e0)");
+    bar.addEventListener("click", (ev) => {
+      const b = ev.target.closest("button[data-pl]");
+      if (!b || b.disabled) return;
+      const k = b.dataset.pl;
+      if (k === "no") this.cancel();
+      else if (k === "ok") this.commit();
+    });
+    // jangan sampai sentuhan di bar ikut jadi sentuhan kanvas / zoom
+    ["pointerdown", "pointerup", "pointermove"].forEach(t => bar.addEventListener(t, (ev) => ev.stopPropagation()));
+    document.body.appendChild(bar);
+    this._bar = bar;
+  }
+};
+
+/* ======================================================================
+   FILE ASAL: media.js   (119 baris)   [7/491]
    ====================================================================== */
 /*
   media.js
@@ -665,7 +849,7 @@ const MediaEngine = {
 };
 
 /* ======================================================================
-   FILE ASAL: media-extract-wav.js   (54 baris)   [7/490]
+   FILE ASAL: media-extract-wav.js   (54 baris)   [8/491]
    ====================================================================== */
 /*
   media-extract-wav.js
@@ -723,7 +907,7 @@ Modul.extend(MediaEngine, "media-extract-wav.js", {
 }, "MediaEngine");
 
 /* ======================================================================
-   FILE ASAL: media-extract-ffmpeg.js   (83 baris)   [8/490]
+   FILE ASAL: media-extract-ffmpeg.js   (83 baris)   [9/491]
    ====================================================================== */
 /*
   media-extract-ffmpeg.js
@@ -810,7 +994,7 @@ Modul.extend(MediaEngine, "media-extract-ffmpeg.js", {
 }, "MediaEngine");
 
 /* ======================================================================
-   FILE ASAL: media-tracks.js   (109 baris)   [9/490]
+   FILE ASAL: media-tracks.js   (109 baris)   [10/491]
    ====================================================================== */
 /*
   media-tracks.js
@@ -923,7 +1107,7 @@ Modul.extend(MediaEngine, "media-tracks.js", {
 }, "MediaEngine");
 
 /* ======================================================================
-   FILE ASAL: media-tracks-wave.js   (76 baris)   [10/490]
+   FILE ASAL: media-tracks-wave.js   (76 baris)   [11/491]
    ====================================================================== */
 /*
   media-tracks-wave.js
@@ -1003,7 +1187,7 @@ Modul.extend(MediaEngine, "media-tracks-wave.js", {
 }, "MediaEngine");
 
 /* ======================================================================
-   FILE ASAL: media-playback.js   (135 baris)   [11/490]
+   FILE ASAL: media-playback.js   (135 baris)   [12/491]
    ====================================================================== */
 /*
   media-playback.js
@@ -1142,7 +1326,7 @@ Modul.extend(MediaEngine, "media-playback.js", {
 }, "MediaEngine");
 
 /* ======================================================================
-   FILE ASAL: media-import.js   (38 baris)   [12/490]
+   FILE ASAL: media-import.js   (38 baris)   [13/491]
    ====================================================================== */
 /*
   media-import.js
@@ -1184,7 +1368,7 @@ Modul.extend(MediaEngine, "media-import.js", {
 }, "MediaEngine");
 
 /* ======================================================================
-   FILE ASAL: media-import-image.js   (42 baris)   [13/490]
+   FILE ASAL: media-import-image.js   (42 baris)   [14/491]
    ====================================================================== */
 /*
   media-import-image.js
@@ -1230,7 +1414,7 @@ Modul.extend(MediaEngine, "media-import-image.js", {
 }, "MediaEngine");
 
 /* ======================================================================
-   FILE ASAL: media-import-audio.js   (38 baris)   [14/490]
+   FILE ASAL: media-import-audio.js   (38 baris)   [15/491]
    ====================================================================== */
 /*
   media-import-audio.js
@@ -1272,7 +1456,7 @@ Modul.extend(MediaEngine, "media-import-audio.js", {
 }, "MediaEngine");
 
 /* ======================================================================
-   FILE ASAL: media-import-video.js   (35 baris)   [15/490]
+   FILE ASAL: media-import-video.js   (35 baris)   [16/491]
    ====================================================================== */
 /*
   media-import-video.js
@@ -1311,7 +1495,7 @@ Modul.extend(MediaEngine, "media-import-video.js", {
 }, "MediaEngine");
 
 /* ======================================================================
-   FILE ASAL: media-record-mic.js   (142 baris)   [16/490]
+   FILE ASAL: media-record-mic.js   (142 baris)   [17/491]
    ====================================================================== */
 /*
   media-record-mic.js
@@ -1457,7 +1641,7 @@ Modul.extend(MediaEngine, "media-record-mic.js", {
 }, "MediaEngine");
 
 /* ======================================================================
-   FILE ASAL: media-extract.js   (315 baris)   [17/490]
+   FILE ASAL: media-extract.js   (315 baris)   [18/491]
    ====================================================================== */
 /*
   media-extract.js
@@ -1776,7 +1960,7 @@ Modul.extend(MediaEngine, "media-extract.js", {
 }, "MediaEngine");
 
 /* ======================================================================
-   FILE ASAL: media-trim.js   (132 baris)   [18/490]
+   FILE ASAL: media-trim.js   (132 baris)   [19/491]
    ====================================================================== */
 /*
   media-trim.js
@@ -1912,7 +2096,7 @@ Modul.extend(MediaEngine, "media-trim.js", {
 }, "MediaEngine");
 
 /* ======================================================================
-   FILE ASAL: media-preview.js   (65 baris)   [19/490]
+   FILE ASAL: media-preview.js   (65 baris)   [20/491]
    ====================================================================== */
 /*
   media-preview.js
@@ -1981,7 +2165,7 @@ Modul.extend(MediaEngine, "media-preview.js", {
 }, "MediaEngine");
 
 /* ======================================================================
-   FILE ASAL: media-speed.js   (38 baris)   [20/490]
+   FILE ASAL: media-speed.js   (38 baris)   [21/491]
    ====================================================================== */
 /*
   media-speed.js
@@ -2023,7 +2207,7 @@ Modul.extend(MediaEngine, "media-speed.js", {
 }, "MediaEngine");
 
 /* ======================================================================
-   FILE ASAL: media-speed-editor.js   (207 baris)   [21/490]
+   FILE ASAL: media-speed-editor.js   (207 baris)   [22/491]
    ====================================================================== */
 /*
   media-speed-editor.js
@@ -2234,7 +2418,7 @@ Modul.extend(MediaEngine, "media-speed-editor.js", {
 }, "MediaEngine");
 
 /* ======================================================================
-   FILE ASAL: media-export.js   (227 baris)   [22/490]
+   FILE ASAL: media-export.js   (227 baris)   [23/491]
    ====================================================================== */
 /*
   media-export.js
@@ -2465,7 +2649,7 @@ Modul.extend(MediaEngine, "media-export.js", {
 }, "MediaEngine");
 
 /* ======================================================================
-   FILE ASAL: export.js   (39 baris)   [23/490]
+   FILE ASAL: export.js   (39 baris)   [24/491]
    ====================================================================== */
 /*
   export.js
@@ -2508,7 +2692,7 @@ const ExportEngine = {
 };
 
 /* ======================================================================
-   FILE ASAL: export-modal.js   (134 baris)   [24/490]
+   FILE ASAL: export-modal.js   (134 baris)   [25/491]
    ====================================================================== */
 /*
   export-modal.js
@@ -2646,7 +2830,7 @@ Modul.extend(ExportEngine, "export-modal.js", {
 }, "ExportEngine");
 
 /* ======================================================================
-   FILE ASAL: export-render.js   (144 baris)   [25/490]
+   FILE ASAL: export-render.js   (144 baris)   [26/491]
    ====================================================================== */
 /*
   export-render.js
@@ -2794,7 +2978,7 @@ Modul.extend(ExportEngine, "export-render.js", {
 }, "ExportEngine");
 
 /* ======================================================================
-   FILE ASAL: export-video.js   (442 baris)   [26/490]
+   FILE ASAL: export-video.js   (442 baris)   [27/491]
    ====================================================================== */
 /*
   export-video.js
@@ -3240,7 +3424,7 @@ Modul.extend(ExportEngine, "export-video.js", {
 }, "ExportEngine");
 
 /* ======================================================================
-   FILE ASAL: export-gif.js   (124 baris)   [27/490]
+   FILE ASAL: export-gif.js   (124 baris)   [28/491]
    ====================================================================== */
 /*
   export-gif.js
@@ -3368,7 +3552,7 @@ Modul.extend(ExportEngine, "export-gif.js", {
 }, "ExportEngine");
 
 /* ======================================================================
-   FILE ASAL: export-png.js   (108 baris)   [28/490]
+   FILE ASAL: export-png.js   (108 baris)   [29/491]
    ====================================================================== */
 /*
   export-png.js
@@ -3480,7 +3664,7 @@ Modul.extend(ExportEngine, "export-png.js", {
 }, "ExportEngine");
 
 /* ======================================================================
-   FILE ASAL: export-preview.js   (68 baris)   [29/490]
+   FILE ASAL: export-preview.js   (68 baris)   [30/491]
    ====================================================================== */
 /*
   export-preview.js
@@ -3552,7 +3736,7 @@ Modul.extend(ExportEngine, "export-preview.js", {
 }, "ExportEngine");
 
 /* ======================================================================
-   FILE ASAL: export-share.js   (59 baris)   [30/490]
+   FILE ASAL: export-share.js   (59 baris)   [31/491]
    ====================================================================== */
 /*
   export-share.js
@@ -3615,7 +3799,7 @@ Modul.extend(ExportEngine, "export-share.js", {
 }, "ExportEngine");
 
 /* ======================================================================
-   FILE ASAL: seqcarry.js   (29 baris)   [31/490]
+   FILE ASAL: seqcarry.js   (29 baris)   [32/491]
    ====================================================================== */
 /*
   seqcarry.js
@@ -3648,7 +3832,7 @@ const SeqCarry = {
 };
 
 /* ======================================================================
-   FILE ASAL: seqcarry-math.js   (34 baris)   [32/490]
+   FILE ASAL: seqcarry-math.js   (34 baris)   [33/491]
    ====================================================================== */
 /*
   seqcarry-math.js
@@ -3686,7 +3870,7 @@ Modul.extend(SeqCarry, "seqcarry-math.js", {
 }, "SeqCarry");
 
 /* ======================================================================
-   FILE ASAL: seqcarry-place.js   (107 baris)   [33/490]
+   FILE ASAL: seqcarry-place.js   (107 baris)   [34/491]
    ====================================================================== */
 /*
   seqcarry-place.js
@@ -3797,7 +3981,7 @@ Modul.extend(SeqCarry, "seqcarry-place.js", {
 }, "SeqCarry");
 
 /* ======================================================================
-   FILE ASAL: scenethumb.js   (39 baris)   [34/490]
+   FILE ASAL: scenethumb.js   (39 baris)   [35/491]
    ====================================================================== */
 /*
   scenethumb.js
@@ -3840,7 +4024,7 @@ const SceneThumb = {
 };
 
 /* ======================================================================
-   FILE ASAL: scenethumb-sync.js   (62 baris)   [35/490]
+   FILE ASAL: scenethumb-sync.js   (62 baris)   [36/491]
    ====================================================================== */
 /*
   scenethumb-sync.js
@@ -3906,7 +4090,7 @@ Modul.extend(SceneThumb, "scenethumb-sync.js", {
 }, "SceneThumb");
 
 /* ======================================================================
-   FILE ASAL: scenethumb-fill.js   (105 baris)   [36/490]
+   FILE ASAL: scenethumb-fill.js   (105 baris)   [37/491]
    ====================================================================== */
 /*
   scenethumb-fill.js
@@ -4015,7 +4199,7 @@ Modul.extend(SceneThumb, "scenethumb-fill.js", {
 }, "SceneThumb");
 
 /* ======================================================================
-   FILE ASAL: scenethumb-run.js   (142 baris)   [37/490]
+   FILE ASAL: scenethumb-run.js   (142 baris)   [38/491]
    ====================================================================== */
 /*
   scenethumb-run.js
@@ -4161,7 +4345,7 @@ Modul.extend(SceneThumb, "scenethumb-run.js", {
 }, "SceneThumb");
 
 /* ======================================================================
-   FILE ASAL: scenedrawer.js   (24 baris)   [38/490]
+   FILE ASAL: scenedrawer.js   (24 baris)   [39/491]
    ====================================================================== */
 /*
   scenedrawer.js
@@ -4189,7 +4373,7 @@ const SceneDrawer = {
 };
 
 /* ======================================================================
-   FILE ASAL: scenedrawer-build.js   (133 baris)   [39/490]
+   FILE ASAL: scenedrawer-build.js   (133 baris)   [40/491]
    ====================================================================== */
 /*
   scenedrawer-build.js
@@ -4326,7 +4510,7 @@ Modul.extend(SceneDrawer, "scenedrawer-build.js", {
 }, "SceneDrawer");
 
 /* ======================================================================
-   FILE ASAL: scenedrawer-ctrl.js   (101 baris)   [40/490]
+   FILE ASAL: scenedrawer-ctrl.js   (101 baris)   [41/491]
    ====================================================================== */
 /*
   scenedrawer-ctrl.js
@@ -4431,7 +4615,7 @@ Modul.extend(SceneDrawer, "scenedrawer-ctrl.js", {
 }, "SceneDrawer");
 
 /* ======================================================================
-   FILE ASAL: scenedrawer-seqpanel.js   (76 baris)   [41/490]
+   FILE ASAL: scenedrawer-seqpanel.js   (76 baris)   [42/491]
    ====================================================================== */
 /*
   scenedrawer-seqpanel.js
@@ -4511,7 +4695,7 @@ Modul.extend(SceneDrawer, "scenedrawer-seqpanel.js", {
 }, "SceneDrawer");
 
 /* ======================================================================
-   FILE ASAL: scenecam.js   (42 baris)   [42/490]
+   FILE ASAL: scenecam.js   (42 baris)   [43/491]
    ====================================================================== */
 /*
   scenecam.js
@@ -4557,7 +4741,7 @@ const SceneCam = {
 };
 
 /* ======================================================================
-   FILE ASAL: scenecam-lock.js   (123 baris)   [43/490]
+   FILE ASAL: scenecam-lock.js   (123 baris)   [44/491]
    ====================================================================== */
 /*
   scenecam-lock.js
@@ -4684,7 +4868,7 @@ Modul.extend(SceneCam, "scenecam-lock.js", {
 }, "SceneCam");
 
 /* ======================================================================
-   FILE ASAL: scenecam-live.js   (131 baris)   [44/490]
+   FILE ASAL: scenecam-live.js   (131 baris)   [45/491]
    ====================================================================== */
 /*
   scenecam-live.js
@@ -4819,7 +5003,7 @@ Modul.extend(SceneCam, "scenecam-live.js", {
 }, "SceneCam");
 
 /* ======================================================================
-   FILE ASAL: scenepix.js   (41 baris)   [45/490]
+   FILE ASAL: scenepix.js   (41 baris)   [46/491]
    ====================================================================== */
 /*
   scenepix.js
@@ -4864,7 +5048,7 @@ const ScenePix = {
 };
 
 /* ======================================================================
-   FILE ASAL: scenepix-snap.js   (75 baris)   [46/490]
+   FILE ASAL: scenepix-snap.js   (75 baris)   [47/491]
    ====================================================================== */
 /*
   scenepix-snap.js
@@ -4943,7 +5127,7 @@ Modul.extend(ScenePix, "scenepix-snap.js", {
 }, "ScenePix");
 
 /* ======================================================================
-   FILE ASAL: scenepix-map.js   (116 baris)   [47/490]
+   FILE ASAL: scenepix-map.js   (116 baris)   [48/491]
    ====================================================================== */
 /*
   scenepix-map.js
@@ -5063,7 +5247,7 @@ Modul.extend(ScenePix, "scenepix-map.js", {
 }, "ScenePix");
 
 /* ======================================================================
-   FILE ASAL: scenesmooth.js   (28 baris)   [48/490]
+   FILE ASAL: scenesmooth.js   (28 baris)   [49/491]
    ====================================================================== */
 /*
   scenesmooth.js
@@ -5095,7 +5279,7 @@ const SceneSmooth = {
 };
 
 /* ======================================================================
-   FILE ASAL: scenesmooth-run.js   (113 baris)   [49/490]
+   FILE ASAL: scenesmooth-run.js   (113 baris)   [50/491]
    ====================================================================== */
 /*
   scenesmooth-run.js
@@ -5212,7 +5396,7 @@ Modul.extend(SceneSmooth, "scenesmooth-run.js", {
 }, "SceneSmooth");
 
 /* ======================================================================
-   FILE ASAL: sceneexport.js   (32 baris)   [50/490]
+   FILE ASAL: sceneexport.js   (32 baris)   [51/491]
    ====================================================================== */
 /*
   sceneexport.js
@@ -5248,7 +5432,7 @@ const SceneExport = {
 };
 
 /* ======================================================================
-   FILE ASAL: sceneexport-info.js   (37 baris)   [51/490]
+   FILE ASAL: sceneexport-info.js   (37 baris)   [52/491]
    ====================================================================== */
 /*
   sceneexport-info.js
@@ -5289,7 +5473,7 @@ Modul.extend(SceneExport, "sceneexport-info.js", {
 }, "SceneExport");
 
 /* ======================================================================
-   FILE ASAL: sceneexport-seqprep.js   (57 baris)   [52/490]
+   FILE ASAL: sceneexport-seqprep.js   (57 baris)   [53/491]
    ====================================================================== */
 /*
   sceneexport-seqprep.js
@@ -5350,7 +5534,7 @@ Modul.extend(SceneExport, "sceneexport-seqprep.js", {
 }, "SceneExport");
 
 /* ======================================================================
-   FILE ASAL: sceneexport-begin.js   (103 baris)   [53/490]
+   FILE ASAL: sceneexport-begin.js   (103 baris)   [54/491]
    ====================================================================== */
 /*
   sceneexport-begin.js
@@ -5457,7 +5641,7 @@ Modul.extend(SceneExport, "sceneexport-begin.js", {
 }, "SceneExport");
 
 /* ======================================================================
-   FILE ASAL: sceneexport-frame.js   (107 baris)   [54/490]
+   FILE ASAL: sceneexport-frame.js   (107 baris)   [55/491]
    ====================================================================== */
 /*
   sceneexport-frame.js
@@ -5568,7 +5752,7 @@ Modul.extend(SceneExport, "sceneexport-frame.js", {
 }, "SceneExport");
 
 /* ======================================================================
-   FILE ASAL: sceneexport-draw.js   (84 baris)   [55/490]
+   FILE ASAL: sceneexport-draw.js   (84 baris)   [56/491]
    ====================================================================== */
 /*
   sceneexport-draw.js
@@ -5656,7 +5840,7 @@ Modul.extend(SceneExport, "sceneexport-draw.js", {
 }, "SceneExport");
 
 /* ======================================================================
-   FILE ASAL: sequence.js   (82 baris)   [56/490]
+   FILE ASAL: sequence.js   (82 baris)   [57/491]
    ====================================================================== */
 /*
   sequence.js
@@ -5742,7 +5926,7 @@ const Sequence = {
 };
 
 /* ======================================================================
-   FILE ASAL: sequence-init.js   (68 baris)   [57/490]
+   FILE ASAL: sequence-init.js   (68 baris)   [58/491]
    ====================================================================== */
 /*
   sequence-init.js
@@ -5814,7 +5998,7 @@ Modul.extend(Sequence, "sequence-init.js", {
 }, "Sequence");
 
 /* ======================================================================
-   FILE ASAL: sequence-data.js   (91 baris)   [58/490]
+   FILE ASAL: sequence-data.js   (91 baris)   [59/491]
    ====================================================================== */
 /*
   sequence-data.js
@@ -5909,7 +6093,7 @@ Modul.extend(Sequence, "sequence-data.js", {
 }, "Sequence");
 
 /* ======================================================================
-   FILE ASAL: sequence-ref.js   (136 baris)   [59/490]
+   FILE ASAL: sequence-ref.js   (136 baris)   [60/491]
    ====================================================================== */
 /*
   sequence-ref.js
@@ -6049,7 +6233,7 @@ Modul.extend(Sequence, "sequence-ref.js", {
 }, "Sequence");
 
 /* ======================================================================
-   FILE ASAL: sequence-ui.js   (69 baris)   [60/490]
+   FILE ASAL: sequence-ui.js   (69 baris)   [61/491]
    ====================================================================== */
 /*
   sequence-ui.js
@@ -6122,7 +6306,7 @@ Modul.extend(Sequence, "sequence-ui.js", {
 }, "Sequence");
 
 /* ======================================================================
-   FILE ASAL: sequence-item.js   (164 baris)   [61/490]
+   FILE ASAL: sequence-item.js   (164 baris)   [62/491]
    ====================================================================== */
 /*
   sequence-item.js
@@ -6290,7 +6474,7 @@ Modul.extend(Sequence, "sequence-item.js", {
 }, "Sequence");
 
 /* ======================================================================
-   FILE ASAL: sequence-editui.js   (104 baris)   [62/490]
+   FILE ASAL: sequence-editui.js   (104 baris)   [63/491]
    ====================================================================== */
 /*
   sequence-editui.js
@@ -6398,7 +6582,7 @@ Modul.extend(Sequence, "sequence-editui.js", {
 }, "Sequence");
 
 /* ======================================================================
-   FILE ASAL: sequence-editutil.js   (54 baris)   [63/490]
+   FILE ASAL: sequence-editutil.js   (54 baris)   [64/491]
    ====================================================================== */
 /*
   sequence-editutil.js
@@ -6456,7 +6640,7 @@ Modul.extend(Sequence, "sequence-editutil.js", {
 }, "Sequence");
 
 /* ======================================================================
-   FILE ASAL: sequence-edit.js   (104 baris)   [64/490]
+   FILE ASAL: sequence-edit.js   (104 baris)   [65/491]
    ====================================================================== */
 /*
   sequence-edit.js
@@ -6564,7 +6748,7 @@ Modul.extend(Sequence, "sequence-edit.js", {
 }, "Sequence");
 
 /* ======================================================================
-   FILE ASAL: sequence-frames.js   (171 baris)   [65/490]
+   FILE ASAL: sequence-frames.js   (171 baris)   [66/491]
    ====================================================================== */
 /*
   sequence-frames.js
@@ -6739,7 +6923,7 @@ Modul.extend(Sequence, "sequence-frames.js", {
 }, "Sequence");
 
 /* ======================================================================
-   FILE ASAL: sequence-recover.js   (78 baris)   [66/490]
+   FILE ASAL: sequence-recover.js   (78 baris)   [67/491]
    ====================================================================== */
 /*
   sequence-recover.js
@@ -6821,7 +7005,7 @@ Modul.extend(Sequence, "sequence-recover.js", {
 }, "Sequence");
 
 /* ======================================================================
-   FILE ASAL: sequence-use.js   (166 baris)   [67/490]
+   FILE ASAL: sequence-use.js   (166 baris)   [68/491]
    ====================================================================== */
 /*
   sequence-use.js
@@ -6991,7 +7175,7 @@ Modul.extend(Sequence, "sequence-use.js", {
 }, "Sequence");
 
 /* ======================================================================
-   FILE ASAL: sequence-usefit.js   (116 baris)   [68/490]
+   FILE ASAL: sequence-usefit.js   (116 baris)   [69/491]
    ====================================================================== */
 /*
   sequence-usefit.js
@@ -7111,7 +7295,7 @@ Modul.extend(Sequence, "sequence-usefit.js", {
 }, "Sequence");
 
 /* ======================================================================
-   FILE ASAL: sequence-overlay.js   (102 baris)   [69/490]
+   FILE ASAL: sequence-overlay.js   (102 baris)   [70/491]
    ====================================================================== */
 /*
   sequence-overlay.js
@@ -7217,7 +7401,7 @@ Modul.extend(Sequence, "sequence-overlay.js", {
 }, "Sequence");
 
 /* ======================================================================
-   FILE ASAL: sequence-draw.js   (87 baris)   [70/490]
+   FILE ASAL: sequence-draw.js   (87 baris)   [71/491]
    ====================================================================== */
 /*
   sequence-draw.js
@@ -7308,7 +7492,7 @@ Modul.extend(Sequence, "sequence-draw.js", {
 }, "Sequence");
 
 /* ======================================================================
-   FILE ASAL: sequence-play.js   (110 baris)   [71/490]
+   FILE ASAL: sequence-play.js   (110 baris)   [72/491]
    ====================================================================== */
 /*
   sequence-play.js
@@ -7422,7 +7606,7 @@ Modul.extend(Sequence, "sequence-play.js", {
 }, "Sequence");
 
 /* ======================================================================
-   FILE ASAL: scenerec.js   (40 baris)   [72/490]
+   FILE ASAL: scenerec.js   (40 baris)   [73/491]
    ====================================================================== */
 /*
   scenerec.js
@@ -7466,7 +7650,7 @@ const SceneRec = {
 };
 
 /* ======================================================================
-   FILE ASAL: scenerec-init.js   (61 baris)   [73/490]
+   FILE ASAL: scenerec-init.js   (61 baris)   [74/491]
    ====================================================================== */
 /*
   scenerec-init.js
@@ -7531,7 +7715,7 @@ Modul.extend(SceneRec, "scenerec-init.js", {
 }, "SceneRec");
 
 /* ======================================================================
-   FILE ASAL: scenerec-data.js   (71 baris)   [74/490]
+   FILE ASAL: scenerec-data.js   (71 baris)   [75/491]
    ====================================================================== */
 /*
   scenerec-data.js
@@ -7606,7 +7790,7 @@ Modul.extend(SceneRec, "scenerec-data.js", {
 }, "SceneRec");
 
 /* ======================================================================
-   FILE ASAL: scenerec-cam.js   (167 baris)   [75/490]
+   FILE ASAL: scenerec-cam.js   (167 baris)   [76/491]
    ====================================================================== */
 /*
   scenerec-cam.js
@@ -7777,7 +7961,7 @@ Modul.extend(SceneRec, "scenerec-cam.js", {
 }, "SceneRec");
 
 /* ======================================================================
-   FILE ASAL: scenerec-tick.js   (99 baris)   [76/490]
+   FILE ASAL: scenerec-tick.js   (99 baris)   [77/491]
    ====================================================================== */
 /*
   scenerec-tick.js
@@ -7880,7 +8064,7 @@ Modul.extend(SceneRec, "scenerec-tick.js", {
 }, "SceneRec");
 
 /* ======================================================================
-   FILE ASAL: scenerec-sample.js   (94 baris)   [77/490]
+   FILE ASAL: scenerec-sample.js   (94 baris)   [78/491]
    ====================================================================== */
 /*
   scenerec-sample.js
@@ -7978,7 +8162,7 @@ Modul.extend(SceneRec, "scenerec-sample.js", {
 }, "SceneRec");
 
 /* ======================================================================
-   FILE ASAL: scenerec-count.js   (98 baris)   [78/490]
+   FILE ASAL: scenerec-count.js   (98 baris)   [79/491]
    ====================================================================== */
 /*
   scenerec-count.js
@@ -8080,7 +8264,7 @@ Modul.extend(SceneRec, "scenerec-count.js", {
 }, "SceneRec");
 
 /* ======================================================================
-   FILE ASAL: scenerec-start.js   (131 baris)   [79/490]
+   FILE ASAL: scenerec-start.js   (131 baris)   [80/491]
    ====================================================================== */
 /*
   scenerec-start.js
@@ -8215,7 +8399,7 @@ Modul.extend(SceneRec, "scenerec-start.js", {
 }, "SceneRec");
 
 /* ======================================================================
-   FILE ASAL: scenerec-stop.js   (162 baris)   [80/490]
+   FILE ASAL: scenerec-stop.js   (162 baris)   [81/491]
    ====================================================================== */
 /*
   scenerec-stop.js
@@ -8381,7 +8565,7 @@ Modul.extend(SceneRec, "scenerec-stop.js", {
 }, "SceneRec");
 
 /* ======================================================================
-   FILE ASAL: scenerec-retake.js   (80 baris)   [81/490]
+   FILE ASAL: scenerec-retake.js   (80 baris)   [82/491]
    ====================================================================== */
 /*
   scenerec-retake.js
@@ -8465,7 +8649,7 @@ Modul.extend(SceneRec, "scenerec-retake.js", {
 }, "SceneRec");
 
 /* ======================================================================
-   FILE ASAL: scenerec-audio.js   (58 baris)   [82/490]
+   FILE ASAL: scenerec-audio.js   (58 baris)   [83/491]
    ====================================================================== */
 /*
   scenerec-audio.js
@@ -8527,7 +8711,7 @@ Modul.extend(SceneRec, "scenerec-audio.js", {
 }, "SceneRec");
 
 /* ======================================================================
-   FILE ASAL: scenerec-hold.js   (58 baris)   [83/490]
+   FILE ASAL: scenerec-hold.js   (58 baris)   [84/491]
    ====================================================================== */
 /*
   scenerec-hold.js
@@ -8589,7 +8773,7 @@ Modul.extend(SceneRec, "scenerec-hold.js", {
 }, "SceneRec");
 
 /* ======================================================================
-   FILE ASAL: scenerec-ui.js   (48 baris)   [84/490]
+   FILE ASAL: scenerec-ui.js   (48 baris)   [85/491]
    ====================================================================== */
 /*
   scenerec-ui.js
@@ -8641,7 +8825,7 @@ Modul.extend(SceneRec, "scenerec-ui.js", {
 }, "SceneRec");
 
 /* ======================================================================
-   FILE ASAL: scenerec-render.js   (138 baris)   [85/490]
+   FILE ASAL: scenerec-render.js   (138 baris)   [86/491]
    ====================================================================== */
 /*
   scenerec-render.js
@@ -8783,7 +8967,7 @@ Modul.extend(SceneRec, "scenerec-render.js", {
 }, "SceneRec");
 
 /* ======================================================================
-   FILE ASAL: scenerec-panel.js   (85 baris)   [86/490]
+   FILE ASAL: scenerec-panel.js   (85 baris)   [87/491]
    ====================================================================== */
 /*
   scenerec-panel.js
@@ -8872,7 +9056,7 @@ Modul.extend(SceneRec, "scenerec-panel.js", {
 }, "SceneRec");
 
 /* ======================================================================
-   FILE ASAL: sceneline.js   (76 baris)   [87/490]
+   FILE ASAL: sceneline.js   (76 baris)   [88/491]
    ====================================================================== */
 /*
   sceneline.js
@@ -8952,7 +9136,7 @@ const SceneLine = {
 };
 
 /* ======================================================================
-   FILE ASAL: sceneline-open.js   (77 baris)   [88/490]
+   FILE ASAL: sceneline-open.js   (77 baris)   [89/491]
    ====================================================================== */
 /*
   sceneline-open.js
@@ -9033,7 +9217,7 @@ Modul.extend(SceneLine, "sceneline-open.js", {
 }, "SceneLine");
 
 /* ======================================================================
-   FILE ASAL: sceneline-base.js   (76 baris)   [89/490]
+   FILE ASAL: sceneline-base.js   (76 baris)   [90/491]
    ====================================================================== */
 /*
   sceneline-base.js
@@ -9113,7 +9297,7 @@ Modul.extend(SceneLine, "sceneline-base.js", {
 }, "SceneLine");
 
 /* ======================================================================
-   FILE ASAL: sceneline-build.js   (98 baris)   [90/490]
+   FILE ASAL: sceneline-build.js   (98 baris)   [91/491]
    ====================================================================== */
 /*
   sceneline-build.js
@@ -9215,7 +9399,7 @@ Modul.extend(SceneLine, "sceneline-build.js", {
 }, "SceneLine");
 
 /* ======================================================================
-   FILE ASAL: sceneline-buildmenu.js   (107 baris)   [91/490]
+   FILE ASAL: sceneline-buildmenu.js   (107 baris)   [92/491]
    ====================================================================== */
 /*
   sceneline-buildmenu.js
@@ -9326,7 +9510,7 @@ Modul.extend(SceneLine, "sceneline-buildmenu.js", {
 }, "SceneLine");
 
 /* ======================================================================
-   FILE ASAL: sceneline-draw.js   (126 baris)   [92/490]
+   FILE ASAL: sceneline-draw.js   (126 baris)   [93/491]
    ====================================================================== */
 /*
   sceneline-draw.js
@@ -9456,7 +9640,7 @@ Modul.extend(SceneLine, "sceneline-draw.js", {
 }, "SceneLine");
 
 /* ======================================================================
-   FILE ASAL: sceneline-select.js   (229 baris)   [93/490]
+   FILE ASAL: sceneline-select.js   (229 baris)   [94/491]
    ====================================================================== */
 /*
   sceneline-select.js
@@ -9689,7 +9873,7 @@ Modul.extend(SceneLine, "sceneline-select.js", {
 }, "SceneLine");
 
 /* ======================================================================
-   FILE ASAL: sceneline-gesture.js   (162 baris)   [94/490]
+   FILE ASAL: sceneline-gesture.js   (162 baris)   [95/491]
    ====================================================================== */
 /*
   sceneline-gesture.js
@@ -9855,7 +10039,7 @@ Modul.extend(SceneLine, "sceneline-gesture.js", {
 }, "SceneLine");
 
 /* ======================================================================
-   FILE ASAL: sceneline-play.js   (74 baris)   [95/490]
+   FILE ASAL: sceneline-play.js   (74 baris)   [96/491]
    ====================================================================== */
 /*
   sceneline-play.js
@@ -9933,7 +10117,7 @@ Modul.extend(SceneLine, "sceneline-play.js", {
 }, "SceneLine");
 
 /* ======================================================================
-   FILE ASAL: sceneline-history.js   (114 baris)   [96/490]
+   FILE ASAL: sceneline-history.js   (114 baris)   [97/491]
    ====================================================================== */
 /*
   sceneline-history.js
@@ -10051,7 +10235,7 @@ Modul.extend(SceneLine, "sceneline-history.js", {
 }, "SceneLine");
 
 /* ======================================================================
-   FILE ASAL: sceneline-edit.js   (183 baris)   [97/490]
+   FILE ASAL: sceneline-edit.js   (183 baris)   [98/491]
    ====================================================================== */
 /*
   sceneline-edit.js
@@ -10238,7 +10422,7 @@ Modul.extend(SceneLine, "sceneline-edit.js", {
 }, "SceneLine");
 
 /* ======================================================================
-   FILE ASAL: sceneline-pos.js   (154 baris)   [98/490]
+   FILE ASAL: sceneline-pos.js   (154 baris)   [99/491]
    ====================================================================== */
 /*
   sceneline-pos.js
@@ -10396,7 +10580,7 @@ Modul.extend(SceneLine, "sceneline-pos.js", {
 }, "SceneLine");
 
 /* ======================================================================
-   FILE ASAL: sceneline-audio.js   (105 baris)   [99/490]
+   FILE ASAL: sceneline-audio.js   (105 baris)   [100/491]
    ====================================================================== */
 /*
   sceneline-audio.js
@@ -10505,7 +10689,7 @@ Modul.extend(SceneLine, "sceneline-audio.js", {
 }, "SceneLine");
 
 /* ======================================================================
-   FILE ASAL: sceneline-audiodraw.js   (109 baris)   [100/490]
+   FILE ASAL: sceneline-audiodraw.js   (109 baris)   [101/491]
    ====================================================================== */
 /*
   sceneline-audiodraw.js
@@ -10618,7 +10802,7 @@ Modul.extend(SceneLine, "sceneline-audiodraw.js", {
 }, "SceneLine");
 
 /* ======================================================================
-   FILE ASAL: sceneline-audiosum.js   (122 baris)   [101/490]
+   FILE ASAL: sceneline-audiosum.js   (122 baris)   [102/491]
    ====================================================================== */
 /*
   sceneline-audiosum.js
@@ -10744,7 +10928,7 @@ Modul.extend(SceneLine, "sceneline-audiosum.js", {
 }, "SceneLine");
 
 /* ======================================================================
-   FILE ASAL: sceneline-audioclip.js   (154 baris)   [102/490]
+   FILE ASAL: sceneline-audioclip.js   (154 baris)   [103/491]
    ====================================================================== */
 /*
   sceneline-audioclip.js
@@ -10902,7 +11086,7 @@ Modul.extend(SceneLine, "sceneline-audioclip.js", {
 }, "SceneLine");
 
 /* ======================================================================
-   FILE ASAL: sceneedit.js   (27 baris)   [103/490]
+   FILE ASAL: sceneedit.js   (27 baris)   [104/491]
    ====================================================================== */
 /*
   sceneedit.js
@@ -10933,7 +11117,7 @@ Modul.extend(SceneLine, "sceneline-audioclip.js", {
 const SceneEdit = {};
 
 /* ======================================================================
-   FILE ASAL: sceneedit-time.js   (35 baris)   [104/490]
+   FILE ASAL: sceneedit-time.js   (35 baris)   [105/491]
    ====================================================================== */
 /*
   sceneedit-time.js
@@ -10972,7 +11156,7 @@ Modul.extend(SceneEdit, "sceneedit-time.js", {
 }, "SceneEdit");
 
 /* ======================================================================
-   FILE ASAL: sceneedit-mix.js   (63 baris)   [105/490]
+   FILE ASAL: sceneedit-mix.js   (63 baris)   [106/491]
    ====================================================================== */
 /*
   sceneedit-mix.js
@@ -11039,7 +11223,7 @@ Modul.extend(SceneEdit, "sceneedit-mix.js", {
 }, "SceneEdit");
 
 /* ======================================================================
-   FILE ASAL: sceneedit-cut.js   (96 baris)   [106/490]
+   FILE ASAL: sceneedit-cut.js   (96 baris)   [107/491]
    ====================================================================== */
 /*
   sceneedit-cut.js
@@ -11139,7 +11323,7 @@ Modul.extend(SceneEdit, "sceneedit-cut.js", {
 }, "SceneEdit");
 
 /* ======================================================================
-   FILE ASAL: sceneedit-join.js   (45 baris)   [107/490]
+   FILE ASAL: sceneedit-join.js   (45 baris)   [108/491]
    ====================================================================== */
 /*
   sceneedit-join.js
@@ -11188,7 +11372,7 @@ Modul.extend(SceneEdit, "sceneedit-join.js", {
 }, "SceneEdit");
 
 /* ======================================================================
-   FILE ASAL: sceneedit-delete.js   (35 baris)   [108/490]
+   FILE ASAL: sceneedit-delete.js   (35 baris)   [109/491]
    ====================================================================== */
 /*
   sceneedit-delete.js
@@ -11227,7 +11411,7 @@ Modul.extend(SceneEdit, "sceneedit-delete.js", {
 }, "SceneEdit");
 
 /* ======================================================================
-   FILE ASAL: sceneedit-split.js   (71 baris)   [109/490]
+   FILE ASAL: sceneedit-split.js   (71 baris)   [110/491]
    ====================================================================== */
 /*
   sceneedit-split.js
@@ -11302,7 +11486,7 @@ Modul.extend(SceneEdit, "sceneedit-split.js", {
 }, "SceneEdit");
 
 /* ======================================================================
-   FILE ASAL: sceneedit-duplicate.js   (19 baris)   [110/490]
+   FILE ASAL: sceneedit-duplicate.js   (19 baris)   [111/491]
    ====================================================================== */
 /*
   sceneedit-duplicate.js
@@ -11325,7 +11509,7 @@ Modul.extend(SceneEdit, "sceneedit-duplicate.js", {
 }, "SceneEdit");
 
 /* ======================================================================
-   FILE ASAL: sceneedit-trim.js   (22 baris)   [111/490]
+   FILE ASAL: sceneedit-trim.js   (22 baris)   [112/491]
    ====================================================================== */
 /*
   sceneedit-trim.js
@@ -11351,7 +11535,7 @@ Modul.extend(SceneEdit, "sceneedit-trim.js", {
 }, "SceneEdit");
 
 /* ======================================================================
-   FILE ASAL: sceneedit-retake.js   (127 baris)   [112/490]
+   FILE ASAL: sceneedit-retake.js   (127 baris)   [113/491]
    ====================================================================== */
 /*
   sceneedit-retake.js
@@ -11482,7 +11666,7 @@ Modul.extend(SceneEdit, "sceneedit-retake.js", {
 }, "SceneEdit");
 
 /* ======================================================================
-   FILE ASAL: sceneedit-shift.js   (49 baris)   [113/490]
+   FILE ASAL: sceneedit-shift.js   (49 baris)   [114/491]
    ====================================================================== */
 /*
   sceneedit-shift.js
@@ -11535,7 +11719,7 @@ Modul.extend(SceneEdit, "sceneedit-shift.js", {
 }, "SceneEdit");
 
 /* ======================================================================
-   FILE ASAL: sceneedit-freeze.js   (45 baris)   [114/490]
+   FILE ASAL: sceneedit-freeze.js   (45 baris)   [115/491]
    ====================================================================== */
 /*
   sceneedit-freeze.js
@@ -11584,7 +11768,7 @@ Modul.extend(SceneEdit, "sceneedit-freeze.js", {
 }, "SceneEdit");
 
 /* ======================================================================
-   FILE ASAL: sceneedit-speed.js   (43 baris)   [115/490]
+   FILE ASAL: sceneedit-speed.js   (43 baris)   [116/491]
    ====================================================================== */
 /*
   sceneedit-speed.js
@@ -11631,7 +11815,7 @@ Modul.extend(SceneEdit, "sceneedit-speed.js", {
 }, "SceneEdit");
 
 /* ======================================================================
-   FILE ASAL: sceneedit-merge.js   (113 baris)   [116/490]
+   FILE ASAL: sceneedit-merge.js   (113 baris)   [117/491]
    ====================================================================== */
 /*
   sceneedit-merge.js
@@ -11748,7 +11932,7 @@ Modul.extend(SceneEdit, "sceneedit-merge.js", {
 }, "SceneEdit");
 
 /* ======================================================================
-   FILE ASAL: sceneplay.js   (42 baris)   [117/490]
+   FILE ASAL: sceneplay.js   (42 baris)   [118/491]
    ====================================================================== */
 /*
   sceneplay.js
@@ -11794,7 +11978,7 @@ const ScenePlay = {
 };
 
 /* ======================================================================
-   FILE ASAL: sceneplay-play.js   (169 baris)   [118/490]
+   FILE ASAL: sceneplay-play.js   (169 baris)   [119/491]
    ====================================================================== */
 /*
   sceneplay-play.js
@@ -11967,7 +12151,7 @@ Modul.extend(ScenePlay, "sceneplay-play.js", {
 }, "ScenePlay");
 
 /* ======================================================================
-   FILE ASAL: sceneplay-stop.js   (67 baris)   [119/490]
+   FILE ASAL: sceneplay-stop.js   (67 baris)   [120/491]
    ====================================================================== */
 /*
   sceneplay-stop.js
@@ -12038,7 +12222,7 @@ Modul.extend(ScenePlay, "sceneplay-stop.js", {
 }, "ScenePlay");
 
 /* ======================================================================
-   FILE ASAL: sceneplay-preview.js   (112 baris)   [120/490]
+   FILE ASAL: sceneplay-preview.js   (112 baris)   [121/491]
    ====================================================================== */
 /*
   sceneplay-preview.js
@@ -12154,7 +12338,7 @@ Modul.extend(ScenePlay, "sceneplay-preview.js", {
 }, "ScenePlay");
 
 /* ======================================================================
-   FILE ASAL: sceneplay-pvbind.js   (55 baris)   [121/490]
+   FILE ASAL: sceneplay-pvbind.js   (55 baris)   [122/491]
    ====================================================================== */
 /*
   sceneplay-pvbind.js
@@ -12213,7 +12397,7 @@ Modul.extend(ScenePlay, "sceneplay-pvbind.js", {
 }, "ScenePlay");
 
 /* ======================================================================
-   FILE ASAL: sceneplay-seqsteps.js   (51 baris)   [122/490]
+   FILE ASAL: sceneplay-seqsteps.js   (51 baris)   [123/491]
    ====================================================================== */
 /*
   sceneplay-seqsteps.js
@@ -12268,7 +12452,7 @@ Modul.extend(ScenePlay, "sceneplay-seqsteps.js", {
 }, "ScenePlay");
 
 /* ======================================================================
-   FILE ASAL: sceneplay-hold.js   (125 baris)   [123/490]
+   FILE ASAL: sceneplay-hold.js   (125 baris)   [124/491]
    ====================================================================== */
 /*
   sceneplay-hold.js
@@ -12397,7 +12581,7 @@ Modul.extend(ScenePlay, "sceneplay-hold.js", {
 }, "ScenePlay");
 
 /* ======================================================================
-   FILE ASAL: sceneplay-bind.js   (51 baris)   [124/490]
+   FILE ASAL: sceneplay-bind.js   (51 baris)   [125/491]
    ====================================================================== */
 /*
   sceneplay-bind.js
@@ -12452,7 +12636,7 @@ Modul.extend(ScenePlay, "sceneplay-bind.js", {
 }, "ScenePlay");
 
 /* ======================================================================
-   FILE ASAL: sceneplay-loop.js   (65 baris)   [125/490]
+   FILE ASAL: sceneplay-loop.js   (65 baris)   [126/491]
    ====================================================================== */
 /*
   sceneplay-loop.js
@@ -12521,7 +12705,7 @@ Modul.extend(ScenePlay, "sceneplay-loop.js", {
 }, "ScenePlay");
 
 /* ======================================================================
-   FILE ASAL: sceneplay-sample.js   (57 baris)   [126/490]
+   FILE ASAL: sceneplay-sample.js   (57 baris)   [127/491]
    ====================================================================== */
 /*
   sceneplay-sample.js
@@ -12582,7 +12766,7 @@ Modul.extend(ScenePlay, "sceneplay-sample.js", {
 }, "ScenePlay");
 
 /* ======================================================================
-   FILE ASAL: sceneplay-frame.js   (71 baris)   [127/490]
+   FILE ASAL: sceneplay-frame.js   (71 baris)   [128/491]
    ====================================================================== */
 /*
   sceneplay-frame.js
@@ -12657,7 +12841,7 @@ Modul.extend(ScenePlay, "sceneplay-frame.js", {
 }, "ScenePlay");
 
 /* ======================================================================
-   FILE ASAL: sceneplay-apply-mesh.js   (62 baris)   [128/490]
+   FILE ASAL: sceneplay-apply-mesh.js   (62 baris)   [129/491]
    ====================================================================== */
 /*
   sceneplay-apply-mesh.js
@@ -12723,7 +12907,7 @@ Modul.extend(ScenePlay, "sceneplay-apply-mesh.js", {
 }, "ScenePlay");
 
 /* ======================================================================
-   FILE ASAL: paintlock.js   (45 baris)   [129/490]
+   FILE ASAL: paintlock.js   (45 baris)   [130/491]
    ====================================================================== */
 /*
   paintlock.js
@@ -12772,7 +12956,7 @@ const PaintLockEngine = {
 };
 
 /* ======================================================================
-   FILE ASAL: paintlock-ants.js   (38 baris)   [130/490]
+   FILE ASAL: paintlock-ants.js   (38 baris)   [131/491]
    ====================================================================== */
 /*
   paintlock-ants.js
@@ -12814,7 +12998,7 @@ const MarchingAntsEngine = {
 };
 
 /* ======================================================================
-   FILE ASAL: paintlock-mask.js   (78 baris)   [131/490]
+   FILE ASAL: paintlock-mask.js   (78 baris)   [132/491]
    ====================================================================== */
 /*
   paintlock-mask.js
@@ -12896,7 +13080,7 @@ Modul.extend(PaintLockEngine, "paintlock-mask.js", {
 }, "PaintLockEngine");
 
 /* ======================================================================
-   FILE ASAL: paintlock-bar.js   (31 baris)   [132/490]
+   FILE ASAL: paintlock-bar.js   (31 baris)   [133/491]
    ====================================================================== */
 /*
   paintlock-bar.js
@@ -12931,7 +13115,7 @@ Modul.extend(PaintLockEngine, "paintlock-bar.js", {
 }, "PaintLockEngine");
 
 /* ======================================================================
-   FILE ASAL: paintlock-overlay.js   (42 baris)   [133/490]
+   FILE ASAL: paintlock-overlay.js   (42 baris)   [134/491]
    ====================================================================== */
 /*
   paintlock-overlay.js
@@ -12977,7 +13161,7 @@ Modul.extend(PaintLockEngine, "paintlock-overlay.js", {
 }, "PaintLockEngine");
 
 /* ======================================================================
-   FILE ASAL: lasso.js   (93 baris)   [134/490]
+   FILE ASAL: lasso.js   (93 baris)   [135/491]
    ====================================================================== */
 /*
   lasso.js
@@ -13074,7 +13258,7 @@ sourcePath: null,   // titik lasso koordinat LOKAL layer -- null kalau hasil "Te
 };
 
 /* ======================================================================
-   FILE ASAL: lasso-state.js   (48 baris)   [135/490]
+   FILE ASAL: lasso-state.js   (48 baris)   [136/491]
    ====================================================================== */
 /*
   lasso-state.js
@@ -13126,7 +13310,7 @@ Modul.extend(LassoEngine, "lasso-state.js", {
 }, "LassoEngine");
 
 /* ======================================================================
-   FILE ASAL: lasso-draw.js   (146 baris)   [136/490]
+   FILE ASAL: lasso-draw.js   (146 baris)   [137/491]
    ====================================================================== */
 /*
   lasso-draw.js
@@ -13276,7 +13460,7 @@ Modul.extend(LassoEngine, "lasso-draw.js", {
 }, "LassoEngine");
 
 /* ======================================================================
-   FILE ASAL: lasso-selectall.js   (51 baris)   [137/490]
+   FILE ASAL: lasso-selectall.js   (51 baris)   [138/491]
    ====================================================================== */
 /*
   lasso-selectall.js
@@ -13331,7 +13515,7 @@ Modul.extend(LassoEngine, "lasso-selectall.js", {
 }, "LassoEngine");
 
 /* ======================================================================
-   FILE ASAL: lasso-begin.js   (107 baris)   [138/490]
+   FILE ASAL: lasso-begin.js   (107 baris)   [139/491]
    ====================================================================== */
 /*
   lasso-begin.js
@@ -13442,7 +13626,7 @@ Modul.extend(LassoEngine, "lasso-begin.js", {
 }, "LassoEngine");
 
 /* ======================================================================
-   FILE ASAL: lasso-wand.js   (209 baris)   [139/490]
+   FILE ASAL: lasso-wand.js   (209 baris)   [140/491]
    ====================================================================== */
 /*
   lasso-wand.js
@@ -13655,7 +13839,7 @@ Modul.extend(LassoEngine, "lasso-wand.js", {
 }, "LassoEngine");
 
 /* ======================================================================
-   FILE ASAL: lasso-contour.js   (100 baris)   [140/490]
+   FILE ASAL: lasso-contour.js   (100 baris)   [141/491]
    ====================================================================== */
 /*
   lasso-contour.js
@@ -13759,7 +13943,7 @@ Modul.extend(LassoEngine, "lasso-contour.js", {
 }, "LassoEngine");
 
 /* ======================================================================
-   FILE ASAL: lasso-pathmask.js   (27 baris)   [141/490]
+   FILE ASAL: lasso-pathmask.js   (27 baris)   [142/491]
    ====================================================================== */
 /*
   lasso-pathmask.js
@@ -13790,7 +13974,7 @@ Modul.extend(LassoEngine, "lasso-pathmask.js", {
 }, "LassoEngine");
 
 /* ======================================================================
-   FILE ASAL: lasso-invert.js   (60 baris)   [142/490]
+   FILE ASAL: lasso-invert.js   (60 baris)   [143/491]
    ====================================================================== */
 /*
   lasso-invert.js
@@ -13854,7 +14038,7 @@ Modul.extend(LassoEngine, "lasso-invert.js", {
 }, "LassoEngine");
 
 /* ======================================================================
-   FILE ASAL: lasso-clipboard.js   (44 baris)   [143/490]
+   FILE ASAL: lasso-clipboard.js   (44 baris)   [144/491]
    ====================================================================== */
 /*
   lasso-clipboard.js
@@ -13902,7 +14086,7 @@ Modul.extend(LassoEngine, "lasso-clipboard.js", {
 }, "LassoEngine");
 
 /* ======================================================================
-   FILE ASAL: lasso-preview.js   (46 baris)   [144/490]
+   FILE ASAL: lasso-preview.js   (46 baris)   [145/491]
    ====================================================================== */
 /*
   lasso-preview.js
@@ -13952,7 +14136,7 @@ Modul.extend(LassoEngine, "lasso-preview.js", {
 }, "LassoEngine");
 
 /* ======================================================================
-   FILE ASAL: lasso-lock.js   (50 baris)   [145/490]
+   FILE ASAL: lasso-lock.js   (50 baris)   [146/491]
    ====================================================================== */
 /*
   lasso-lock.js
@@ -14006,7 +14190,7 @@ Modul.extend(LassoEngine, "lasso-lock.js", {
 }, "LassoEngine");
 
 /* ======================================================================
-   FILE ASAL: lasso-importimage.js   (57 baris)   [146/490]
+   FILE ASAL: lasso-importimage.js   (57 baris)   [147/491]
    ====================================================================== */
 /*
   lasso-importimage.js
@@ -14067,7 +14251,7 @@ Modul.extend(LassoEngine, "lasso-importimage.js", {
 }, "LassoEngine");
 
 /* ======================================================================
-   FILE ASAL: lasso-adjust.js   (125 baris)   [147/490]
+   FILE ASAL: lasso-adjust.js   (125 baris)   [148/491]
    ====================================================================== */
 /*
   LASSO-ADJUST.JS
@@ -14196,7 +14380,7 @@ Object.assign(LassoEngine, {
 });
 
 /* ======================================================================
-   FILE ASAL: lasso-transform.js   (183 baris)   [148/490]
+   FILE ASAL: lasso-transform.js   (183 baris)   [149/491]
    ====================================================================== */
 /*
   LASSO-TRANSFORM.JS
@@ -14383,7 +14567,7 @@ Object.assign(LassoEngine, {
 });
 
 /* ======================================================================
-   FILE ASAL: lasso-commit.js   (124 baris)   [149/490]
+   FILE ASAL: lasso-commit.js   (124 baris)   [150/491]
    ====================================================================== */
 /*
   lasso-commit.js
@@ -14511,7 +14695,7 @@ Modul.extend(LassoEngine, "lasso-commit.js", {
 }, "LassoEngine");
 
 /* ======================================================================
-   FILE ASAL: lasso-drawbar.js   (35 baris)   [150/490]
+   FILE ASAL: lasso-drawbar.js   (35 baris)   [151/491]
    ====================================================================== */
 /*
   lasso-drawbar.js
@@ -14550,7 +14734,7 @@ Modul.extend(LassoEngine, "lasso-drawbar.js", {
 }, "LassoEngine");
 
 /* ======================================================================
-   FILE ASAL: lasso-transformbar.js   (114 baris)   [151/490]
+   FILE ASAL: lasso-transformbar.js   (114 baris)   [152/491]
    ====================================================================== */
 /*
   lasso-transformbar.js
@@ -14668,7 +14852,7 @@ Modul.extend(LassoEngine, "lasso-transformbar.js", {
 }, "LassoEngine");
 
 /* ======================================================================
-   FILE ASAL: lasso-overlay.js   (150 baris)   [152/490]
+   FILE ASAL: lasso-overlay.js   (150 baris)   [153/491]
    ====================================================================== */
 /*
   lasso-overlay.js
@@ -14822,7 +15006,7 @@ Modul.extend(LassoEngine, "lasso-overlay.js", {
 }, "LassoEngine");
 
 /* ======================================================================
-   FILE ASAL: meshtransformpanel.js   (46 baris)   [153/490]
+   FILE ASAL: meshtransformpanel.js   (46 baris)   [154/491]
    ====================================================================== */
 /*
   meshtransformpanel.js
@@ -14872,7 +15056,7 @@ const MeshTransformPanel = {
 };
 
 /* ======================================================================
-   FILE ASAL: mtpanel-bind.js   (31 baris)   [154/490]
+   FILE ASAL: mtpanel-bind.js   (31 baris)   [155/491]
    ====================================================================== */
 /*
   mtpanel-bind.js
@@ -14907,7 +15091,7 @@ Modul.extend(MeshTransformPanel, "mtpanel-bind.js", {
 }, "MeshTransformPanel");
 
 /* ======================================================================
-   FILE ASAL: mtpanel-delete.js   (42 baris)   [155/490]
+   FILE ASAL: mtpanel-delete.js   (42 baris)   [156/491]
    ====================================================================== */
 /*
   mtpanel-delete.js
@@ -14953,7 +15137,7 @@ Modul.extend(MeshTransformPanel, "mtpanel-delete.js", {
 }, "MeshTransformPanel");
 
 /* ======================================================================
-   FILE ASAL: mtpanel-list.js   (80 baris)   [156/490]
+   FILE ASAL: mtpanel-list.js   (80 baris)   [157/491]
    ====================================================================== */
 /*
   mtpanel-list.js
@@ -15037,7 +15221,7 @@ Modul.extend(MeshTransformPanel, "mtpanel-list.js", {
 }, "MeshTransformPanel");
 
 /* ======================================================================
-   FILE ASAL: mtpanel-lock.js   (24 baris)   [157/490]
+   FILE ASAL: mtpanel-lock.js   (24 baris)   [158/491]
    ====================================================================== */
 /*
   mtpanel-lock.js
@@ -15065,7 +15249,7 @@ Modul.extend(MeshTransformPanel, "mtpanel-lock.js", {
 }, "MeshTransformPanel");
 
 /* ======================================================================
-   FILE ASAL: mtpanel-rename.js   (27 baris)   [158/490]
+   FILE ASAL: mtpanel-rename.js   (27 baris)   [159/491]
    ====================================================================== */
 /*
   mtpanel-rename.js
@@ -15096,7 +15280,7 @@ Modul.extend(MeshTransformPanel, "mtpanel-rename.js", {
 }, "MeshTransformPanel");
 
 /* ======================================================================
-   FILE ASAL: mtpanel-save.js   (14 baris)   [159/490]
+   FILE ASAL: mtpanel-save.js   (14 baris)   [160/491]
    ====================================================================== */
 /*
   mtpanel-save.js
@@ -15114,7 +15298,7 @@ Modul.extend(MeshTransformPanel, "mtpanel-save.js", {
 }, "MeshTransformPanel");
 
 /* ======================================================================
-   FILE ASAL: mtpanel-toggle.js   (25 baris)   [160/490]
+   FILE ASAL: mtpanel-toggle.js   (25 baris)   [161/491]
    ====================================================================== */
 /*
   mtpanel-toggle.js
@@ -15143,7 +15327,7 @@ Modul.extend(MeshTransformPanel, "mtpanel-toggle.js", {
 }, "MeshTransformPanel");
 
 /* ======================================================================
-   FILE ASAL: meshtransform.js   (50 baris)   [161/490]
+   FILE ASAL: meshtransform.js   (50 baris)   [162/491]
    ====================================================================== */
 /*
   meshtransform.js
@@ -15197,7 +15381,7 @@ const MeshTransformEngine = {
 };
 
 /* ======================================================================
-   FILE ASAL: mt-bake.js   (32 baris)   [162/490]
+   FILE ASAL: mt-bake.js   (32 baris)   [163/491]
    ====================================================================== */
 /*
   mt-bake.js
@@ -15233,7 +15417,7 @@ Modul.extend(MeshTransformEngine, "mt-bake.js", {
 }, "MeshTransformEngine");
 
 /* ======================================================================
-   FILE ASAL: mt-create.js   (83 baris)   [163/490]
+   FILE ASAL: mt-create.js   (83 baris)   [164/491]
    ====================================================================== */
 /*
   mt-create.js
@@ -15320,7 +15504,7 @@ Modul.extend(MeshTransformEngine, "mt-create.js", {
 }, "MeshTransformEngine");
 
 /* ======================================================================
-   FILE ASAL: mt-drag.js   (49 baris)   [164/490]
+   FILE ASAL: mt-drag.js   (49 baris)   [165/491]
    ====================================================================== */
 /*
   mt-drag.js
@@ -15373,7 +15557,7 @@ Modul.extend(MeshTransformEngine, "mt-drag.js", {
 }, "MeshTransformEngine");
 
 /* ======================================================================
-   FILE ASAL: mt-group.js   (105 baris)   [165/490]
+   FILE ASAL: mt-group.js   (105 baris)   [166/491]
    ====================================================================== */
 /*
   mt-group.js
@@ -15482,7 +15666,7 @@ Modul.extend(MeshTransformEngine, "mt-group.js", {
 }, "MeshTransformEngine");
 
 /* ======================================================================
-   FILE ASAL: mt-keyframe.js   (67 baris)   [166/490]
+   FILE ASAL: mt-keyframe.js   (67 baris)   [167/491]
    ====================================================================== */
 /*
   mt-keyframe.js
@@ -15553,7 +15737,7 @@ Modul.extend(MeshTransformEngine, "mt-keyframe.js", {
 }, "MeshTransformEngine");
 
 /* ======================================================================
-   FILE ASAL: mt-modebuttons.js   (51 baris)   [167/490]
+   FILE ASAL: mt-modebuttons.js   (51 baris)   [168/491]
    ====================================================================== */
 /*
   mt-modebuttons.js
@@ -15608,7 +15792,7 @@ Modul.extend(MeshTransformEngine, "mt-modebuttons.js", {
 }, "MeshTransformEngine");
 
 /* ======================================================================
-   FILE ASAL: mt-overlay.js   (31 baris)   [168/490]
+   FILE ASAL: mt-overlay.js   (31 baris)   [169/491]
    ====================================================================== */
 /*
   mt-overlay.js
@@ -15643,7 +15827,7 @@ Modul.extend(MeshTransformEngine, "mt-overlay.js", {
 }, "MeshTransformEngine");
 
 /* ======================================================================
-   FILE ASAL: mt-pointer.js   (104 baris)   [169/490]
+   FILE ASAL: mt-pointer.js   (104 baris)   [170/491]
    ====================================================================== */
 /*
   mt-pointer.js
@@ -15751,7 +15935,7 @@ Modul.extend(MeshTransformEngine, "mt-pointer.js", {
 }, "MeshTransformEngine");
 
 /* ======================================================================
-   FILE ASAL: mt-warp.js   (155 baris)   [170/490]
+   FILE ASAL: mt-warp.js   (155 baris)   [171/491]
    ====================================================================== */
 /*
   mt-warp.js
@@ -15910,7 +16094,7 @@ Modul.extend(MeshTransformEngine, "mt-warp.js", {
 }, "MeshTransformEngine");
 
 /* ======================================================================
-   FILE ASAL: meshpart.js   (83 baris)   [171/490]
+   FILE ASAL: meshpart.js   (83 baris)   [172/491]
    ====================================================================== */
 /*
   meshpart.js
@@ -15997,7 +16181,7 @@ const MeshPartEngine = {
 };
 
 /* ======================================================================
-   FILE ASAL: meshpart-space.js   (60 baris)   [172/490]
+   FILE ASAL: meshpart-space.js   (60 baris)   [173/491]
    ====================================================================== */
 /*
   meshpart-space.js
@@ -16061,7 +16245,7 @@ Modul.extend(MeshPartEngine, "meshpart-space.js", {
 }, "MeshPartEngine");
 
 /* ======================================================================
-   FILE ASAL: meshpart-detect.js   (278 baris)   [173/490]
+   FILE ASAL: meshpart-detect.js   (278 baris)   [174/491]
    ====================================================================== */
 /*
   meshpart-detect.js
@@ -16343,7 +16527,7 @@ Modul.extend(MeshPartEngine, "meshpart-detect.js", {
 }, "MeshPartEngine");
 
 /* ======================================================================
-   FILE ASAL: meshpart-fill.js   (138 baris)   [174/490]
+   FILE ASAL: meshpart-fill.js   (138 baris)   [175/491]
    ====================================================================== */
 /*
   meshpart-fill.js
@@ -16485,7 +16669,7 @@ Modul.extend(MeshPartEngine, "meshpart-fill.js", {
 }, "MeshPartEngine");
 
 /* ======================================================================
-   FILE ASAL: meshpart-pointer.js   (239 baris)   [175/490]
+   FILE ASAL: meshpart-pointer.js   (239 baris)   [176/491]
    ====================================================================== */
 /*
   meshpart-pointer.js
@@ -16728,7 +16912,7 @@ Modul.extend(MeshPartEngine, "meshpart-pointer.js", {
 }, "MeshPartEngine");
 
 /* ======================================================================
-   FILE ASAL: meshpart-warp.js   (566 baris)   [176/490]
+   FILE ASAL: meshpart-warp.js   (566 baris)   [177/491]
    ====================================================================== */
 /*
   meshpart-warp.js
@@ -17298,7 +17482,7 @@ Modul.extend(MeshPartEngine, "meshpart-warp.js", {
 }, "MeshPartEngine");
 
 /* ======================================================================
-   FILE ASAL: meshpart-capture.js   (322 baris)   [177/490]
+   FILE ASAL: meshpart-capture.js   (322 baris)   [178/491]
    ====================================================================== */
 /*
   meshpart-capture.js
@@ -17624,7 +17808,7 @@ Modul.extend(MeshPartEngine, "meshpart-capture.js", {
 })();
 
 /* ======================================================================
-   FILE ASAL: meshpart-overlay.js   (82 baris)   [178/490]
+   FILE ASAL: meshpart-overlay.js   (82 baris)   [179/491]
    ====================================================================== */
 /*
   meshpart-overlay.js
@@ -17710,7 +17894,7 @@ Modul.extend(MeshPartEngine, "meshpart-overlay.js", {
 }, "MeshPartEngine");
 
 /* ======================================================================
-   FILE ASAL: meshpart-bar.js   (222 baris)   [179/490]
+   FILE ASAL: meshpart-bar.js   (222 baris)   [180/491]
    ====================================================================== */
 /*
   meshpart-bar.js
@@ -17936,7 +18120,7 @@ Modul.extend(MeshPartEngine, "meshpart-bar.js", {
 }, "MeshPartEngine");
 
 /* ======================================================================
-   FILE ASAL: meshpart-follow.js   (272 baris)   [180/490]
+   FILE ASAL: meshpart-follow.js   (272 baris)   [181/491]
    ====================================================================== */
 /*
   meshpart-follow.js
@@ -18212,7 +18396,7 @@ Modul.extend(MeshPartEngine, "meshpart-follow.js", {
 }, "MeshPartEngine");
 
 /* ======================================================================
-   FILE ASAL: meshpart-group.js   (183 baris)   [181/490]
+   FILE ASAL: meshpart-group.js   (183 baris)   [182/491]
    ====================================================================== */
 /*
   meshpart-group.js
@@ -18399,7 +18583,7 @@ Modul.extend(MeshPartEngine, "meshpart-group.js", {
 }, "MeshPartEngine");
 
 /* ======================================================================
-   FILE ASAL: meshpart-prep.js   (439 baris)   [182/490]
+   FILE ASAL: meshpart-prep.js   (439 baris)   [183/491]
    ====================================================================== */
 /*
   meshpart-prep.js
@@ -18842,7 +19026,7 @@ Modul.extend(MeshPartEngine, "meshpart-prep.js", {
 }, "MeshPartEngine");
 
 /* ======================================================================
-   FILE ASAL: meshpart-analyze.js   (255 baris)   [183/490]
+   FILE ASAL: meshpart-analyze.js   (255 baris)   [184/491]
    ====================================================================== */
 /*
   meshpart-analyze.js
@@ -19101,7 +19285,7 @@ Modul.extend(MeshPartEngine, "meshpart-analyze.js", {
 }, "MeshPartEngine");
 
 /* ======================================================================
-   FILE ASAL: meshpart-neon.js   (275 baris)   [184/490]
+   FILE ASAL: meshpart-neon.js   (275 baris)   [185/491]
    ====================================================================== */
 /*
   meshpart-neon.js
@@ -19380,7 +19564,7 @@ Modul.extend(MeshPartEngine, "meshpart-neon.js", {
 }, "MeshPartEngine");
 
 /* ======================================================================
-   FILE ASAL: meshpart-commit.js   (263 baris)   [185/490]
+   FILE ASAL: meshpart-commit.js   (263 baris)   [186/491]
    ====================================================================== */
 /*
   meshpart-commit.js
@@ -19647,7 +19831,7 @@ Modul.extend(MeshPartEngine, "meshpart-commit.js", {
 }, "MeshPartEngine");
 
 /* ======================================================================
-   FILE ASAL: meshpanel.js   (26 baris)   [186/490]
+   FILE ASAL: meshpanel.js   (26 baris)   [187/491]
    ====================================================================== */
 /*
   meshpanel.js
@@ -19677,7 +19861,7 @@ const MeshPanel = {
 };
 
 /* ======================================================================
-   FILE ASAL: meshpanel-bind.js   (37 baris)   [187/490]
+   FILE ASAL: meshpanel-bind.js   (37 baris)   [188/491]
    ====================================================================== */
 /*
   meshpanel-bind.js
@@ -19718,7 +19902,7 @@ Modul.extend(MeshPanel, "meshpanel-bind.js", {
 }, "MeshPanel");
 
 /* ======================================================================
-   FILE ASAL: meshpanel-delete.js   (88 baris)   [188/490]
+   FILE ASAL: meshpanel-delete.js   (88 baris)   [189/491]
    ====================================================================== */
 /*
   meshpanel-delete.js
@@ -19810,7 +19994,7 @@ Modul.extend(MeshPanel, "meshpanel-delete.js", {
 }, "MeshPanel");
 
 /* ======================================================================
-   FILE ASAL: meshpanel-list.js   (80 baris)   [189/490]
+   FILE ASAL: meshpanel-list.js   (80 baris)   [190/491]
    ====================================================================== */
 /*
   meshpanel-list.js
@@ -19894,7 +20078,7 @@ render() {
 }, "MeshPanel");
 
 /* ======================================================================
-   FILE ASAL: meshpanel-lock.js   (23 baris)   [190/490]
+   FILE ASAL: meshpanel-lock.js   (23 baris)   [191/491]
    ====================================================================== */
 /*
   meshpanel-lock.js
@@ -19921,7 +20105,7 @@ Modul.extend(MeshPanel, "meshpanel-lock.js", {
 }, "MeshPanel");
 
 /* ======================================================================
-   FILE ASAL: meshpanel-rename.js   (25 baris)   [191/490]
+   FILE ASAL: meshpanel-rename.js   (25 baris)   [192/491]
    ====================================================================== */
 /*
   meshpanel-rename.js
@@ -19950,7 +20134,7 @@ Modul.extend(MeshPanel, "meshpanel-rename.js", {
 }, "MeshPanel");
 
 /* ======================================================================
-   FILE ASAL: meshpanel-restore.js   (34 baris)   [192/490]
+   FILE ASAL: meshpanel-restore.js   (34 baris)   [193/491]
    ====================================================================== */
 /*
   meshpanel-restore.js
@@ -19988,7 +20172,7 @@ Modul.extend(MeshPanel, "meshpanel-restore.js", {
 }, "MeshPanel");
 
 /* ======================================================================
-   FILE ASAL: meshpanel-save.js   (14 baris)   [193/490]
+   FILE ASAL: meshpanel-save.js   (14 baris)   [194/491]
    ====================================================================== */
 /*
   meshpanel-save.js
@@ -20006,7 +20190,7 @@ Modul.extend(MeshPanel, "meshpanel-save.js", {
 }, "MeshPanel");
 
 /* ======================================================================
-   FILE ASAL: meshpanel-toggle.js   (75 baris)   [194/490]
+   FILE ASAL: meshpanel-toggle.js   (75 baris)   [195/491]
    ====================================================================== */
 /*
   meshpanel-toggle.js
@@ -20085,7 +20269,7 @@ Modul.extend(MeshPanel, "meshpanel-toggle.js", {
 }, "MeshPanel");
 
 /* ======================================================================
-   FILE ASAL: mesh.js   (46 baris)   [195/490]
+   FILE ASAL: mesh.js   (46 baris)   [196/491]
    ====================================================================== */
 /*
   mesh.js
@@ -20135,7 +20319,7 @@ const MeshEngine = {
 };
 
 /* ======================================================================
-   FILE ASAL: mesh-create.js   (85 baris)   [196/490]
+   FILE ASAL: mesh-create.js   (85 baris)   [197/491]
    ====================================================================== */
 /*
   mesh-create.js
@@ -20224,7 +20408,7 @@ Modul.extend(MeshEngine, "mesh-create.js", {
 }, "MeshEngine");
 
 /* ======================================================================
-   FILE ASAL: mesh-idw.js   (57 baris)   [197/490]
+   FILE ASAL: mesh-idw.js   (57 baris)   [198/491]
    ====================================================================== */
 /*
   mesh-idw.js
@@ -20285,7 +20469,7 @@ Modul.extend(MeshEngine, "mesh-idw.js", {
 }, "MeshEngine");
 
 /* ======================================================================
-   FILE ASAL: mesh-keyframe.js   (116 baris)   [198/490]
+   FILE ASAL: mesh-keyframe.js   (116 baris)   [199/491]
    ====================================================================== */
 /*
   mesh-keyframe.js
@@ -20405,7 +20589,7 @@ Modul.extend(MeshEngine, "mesh-keyframe.js", {
 }, "MeshEngine");
 
 /* ======================================================================
-   FILE ASAL: mesh-modebuttons.js   (73 baris)   [199/490]
+   FILE ASAL: mesh-modebuttons.js   (73 baris)   [200/491]
    ====================================================================== */
 /*
   mesh-modebuttons.js
@@ -20482,7 +20666,7 @@ Modul.extend(MeshEngine, "mesh-modebuttons.js", {
 }, "MeshEngine");
 
 /* ======================================================================
-   FILE ASAL: mesh-overlay.js   (44 baris)   [200/490]
+   FILE ASAL: mesh-overlay.js   (44 baris)   [201/491]
    ====================================================================== */
 /*
   mesh-overlay.js
@@ -20530,7 +20714,7 @@ Modul.extend(MeshEngine, "mesh-overlay.js", {
 }, "MeshEngine");
 
 /* ======================================================================
-   FILE ASAL: mesh-pointer.js   (117 baris)   [201/490]
+   FILE ASAL: mesh-pointer.js   (117 baris)   [202/491]
    ====================================================================== */
 /*
   mesh-pointer.js
@@ -20651,7 +20835,7 @@ Modul.extend(MeshEngine, "mesh-pointer.js", {
 }, "MeshEngine");
 
 /* ======================================================================
-   FILE ASAL: mesh-vertex.js   (65 baris)   [202/490]
+   FILE ASAL: mesh-vertex.js   (65 baris)   [203/491]
    ====================================================================== */
 /*
   mesh-vertex.js
@@ -20720,7 +20904,7 @@ Modul.extend(MeshEngine, "mesh-vertex.js", {
 }, "MeshEngine");
 
 /* ======================================================================
-   FILE ASAL: mesh-warp.js   (211 baris)   [203/490]
+   FILE ASAL: mesh-warp.js   (211 baris)   [204/491]
    ====================================================================== */
 /*
   mesh-warp.js
@@ -20935,7 +21119,7 @@ Modul.extend(MeshEngine, "mesh-warp.js", {
 }, "MeshEngine");
 
 /* ======================================================================
-   FILE ASAL: floatingmenu.js   (29 baris)   [204/490]
+   FILE ASAL: floatingmenu.js   (29 baris)   [205/491]
    ====================================================================== */
 /*
   floatingmenu.js
@@ -20968,7 +21152,7 @@ const FloatingMenu = {
 };
 
 /* ======================================================================
-   FILE ASAL: floatingmenu-close.js   (27 baris)   [205/490]
+   FILE ASAL: floatingmenu-close.js   (27 baris)   [206/491]
    ====================================================================== */
 /*
   floatingmenu-close.js
@@ -20999,7 +21183,7 @@ Modul.extend(FloatingMenu, "floatingmenu-close.js", {
 }, "FloatingMenu");
 
 /* ======================================================================
-   FILE ASAL: floatingmenu-html.js   (44 baris)   [206/490]
+   FILE ASAL: floatingmenu-html.js   (44 baris)   [207/491]
    ====================================================================== */
 /*
   floatingmenu-html.js
@@ -21047,7 +21231,7 @@ Modul.extend(FloatingMenu, "floatingmenu-html.js", {
 }, "FloatingMenu");
 
 /* ======================================================================
-   FILE ASAL: floatingmenu-open.js   (63 baris)   [207/490]
+   FILE ASAL: floatingmenu-open.js   (63 baris)   [208/491]
    ====================================================================== */
 /*
   floatingmenu-open.js
@@ -21114,7 +21298,7 @@ Modul.extend(FloatingMenu, "floatingmenu-open.js", {
 }, "FloatingMenu");
 
 /* ======================================================================
-   FILE ASAL: floatingmenu-sections.js   (45 baris)   [208/490]
+   FILE ASAL: floatingmenu-sections.js   (45 baris)   [209/491]
    ====================================================================== */
 /*
   floatingmenu-sections.js
@@ -21163,7 +21347,7 @@ Modul.extend(FloatingMenu, "floatingmenu-sections.js", {
 }, "FloatingMenu");
 
 /* ======================================================================
-   FILE ASAL: topbar.js   (11 baris)   [209/490]
+   FILE ASAL: topbar.js   (11 baris)   [210/491]
    ====================================================================== */
 /*
   topbar.js
@@ -21178,7 +21362,7 @@ const TopBar = {
 };
 
 /* ======================================================================
-   FILE ASAL: topbar-backguard.js   (65 baris)   [210/490]
+   FILE ASAL: topbar-backguard.js   (65 baris)   [211/491]
    ====================================================================== */
 /*
   topbar-backguard.js
@@ -21247,7 +21431,7 @@ Modul.extend(TopBar, "topbar-backguard.js", {
 }, "TopBar");
 
 /* ======================================================================
-   FILE ASAL: topbar-bind-actions.js   (24 baris)   [211/490]
+   FILE ASAL: topbar-bind-actions.js   (24 baris)   [212/491]
    ====================================================================== */
 /*
   topbar-bind-actions.js
@@ -21275,7 +21459,7 @@ document.getElementById("topbar-import").addEventListener("click", (e) => {
 }, "TopBar");
 
 /* ======================================================================
-   FILE ASAL: topbar-bind-grid.js   (35 baris)   [212/490]
+   FILE ASAL: topbar-bind-grid.js   (35 baris)   [213/491]
    ====================================================================== */
 /*
   topbar-bind-grid.js
@@ -21314,7 +21498,7 @@ document.getElementById("topbar-grid").addEventListener("click", (e) => {
 }, "TopBar");
 
 /* ======================================================================
-   FILE ASAL: topbar-bind-history.js   (109 baris)   [213/490]
+   FILE ASAL: topbar-bind-history.js   (125 baris)   [214/491]
    ====================================================================== */
 /*
   topbar-bind-history.js
@@ -21346,10 +21530,13 @@ Modul.extend(TopBar, "topbar-bind-history.js", {
     // history.js (nunggu proses SEBELUMNYA kelar, bukan nge-block pakai
     // waktu doang) -- jadi jeda ini dibuang, bukan dikurangi durasinya.
     document.getElementById("topbar-undo").addEventListener("click", () => {
+      // Garis sambung lagi berjalan: Undo menghapus titik terakhir (bukan riwayat gambar).
+      if (typeof PolylineEngine !== "undefined" && PolylineEngine.canUndo()) { PolylineEngine.undoPoint(); return; }
       HistoryEngine.undo();
     });
 
    document.getElementById("topbar-redo").addEventListener("click", () => {
+      if (typeof PolylineEngine !== "undefined" && PolylineEngine.canRedo()) { PolylineEngine.redoPoint(); return; }
       HistoryEngine.redo();
     });
 
@@ -21368,7 +21555,8 @@ Modul.extend(TopBar, "topbar-bind-history.js", {
     const b = document.getElementById("topbar-brushfx");
     if (!b) return;
     const on = (typeof BrushLibraryEngine !== "undefined" && BrushLibraryEngine.taperEnabled)
-      || (typeof StabilizerEngine !== "undefined" && StabilizerEngine.level > 0);
+      || (typeof StabilizerEngine !== "undefined" && StabilizerEngine.level > 0)
+      || (typeof PolylineEngine !== "undefined" && PolylineEngine.enabled);
     b.classList.toggle("topbar-btn-active", !!on);
   },
 
@@ -21395,6 +21583,10 @@ Modul.extend(TopBar, "topbar-bind-history.js", {
       <div class="brushfx-title brushfx-title-2">Stabilisator <span class="brushfx-stab-val">${S.level === 0 ? "OFF" : S.level}</span></div>
       <div class="brushsize-popover-row">
         <input type="range" class="brushsize-slider brushfx-stab" min="0" max="10" step="1" value="${S.level}">
+      </div>
+      <div class="brushfx-title brushfx-title-2">Garis sambung</div>
+      <div class="brushsize-popover-row">
+        <button class="brushsize-stabilizer-btn brushfx-poly${(typeof PolylineEngine !== "undefined" && PolylineEngine.enabled) ? " is-active" : ""}">${(typeof PolylineEngine !== "undefined" && PolylineEngine.enabled) ? "ON" : "OFF"}</button>
       </div>`;
     document.body.appendChild(pop);
     const r = btn.getBoundingClientRect();
@@ -21410,6 +21602,14 @@ Modul.extend(TopBar, "topbar-bind-history.js", {
     }));
     const amt = pop.querySelector(".brushfx-amt"), amtV = pop.querySelector(".brushfx-amt-val");
     amt.addEventListener("input", () => { BrushLibraryEngine.setTaperOptions({ amount: +amt.value }); amtV.textContent = amt.value; });
+    const plBtn = pop.querySelector(".brushfx-poly");
+    if (plBtn) plBtn.addEventListener("click", () => {
+      if (typeof PolylineEngine === "undefined") return;
+      PolylineEngine.setEnabled(!PolylineEngine.enabled);
+      plBtn.classList.toggle("is-active", PolylineEngine.enabled);
+      plBtn.textContent = PolylineEngine.enabled ? "ON" : "OFF";
+      this._refreshBrushFxBtn();
+    });
     const st = pop.querySelector(".brushfx-stab"), stV = pop.querySelector(".brushfx-stab-val");
     st.addEventListener("input", () => {
       const v = parseInt(st.value, 10);
@@ -21427,7 +21627,7 @@ Modul.extend(TopBar, "topbar-bind-history.js", {
 }, "TopBar");
 
 /* ======================================================================
-   FILE ASAL: topbar-bind-nav.js   (41 baris)   [214/490]
+   FILE ASAL: topbar-bind-nav.js   (41 baris)   [215/491]
    ====================================================================== */
 /*
   topbar-bind-nav.js
@@ -21472,7 +21672,7 @@ Modul.extend(TopBar, "topbar-bind-nav.js", {
 }, "TopBar");
 
 /* ======================================================================
-   FILE ASAL: topbar-bind-view.js   (27 baris)   [215/490]
+   FILE ASAL: topbar-bind-view.js   (27 baris)   [216/491]
    ====================================================================== */
 /*
   topbar-bind-view.js
@@ -21503,7 +21703,7 @@ Modul.extend(TopBar, "topbar-bind-view.js", {
 }, "TopBar");
 
 /* ======================================================================
-   FILE ASAL: topbar-escape.js   (25 baris)   [216/490]
+   FILE ASAL: topbar-escape.js   (25 baris)   [217/491]
    ====================================================================== */
 /*
   topbar-escape.js
@@ -21532,7 +21732,7 @@ Modul.extend(TopBar, "topbar-escape.js", {
 }, "TopBar");
 
 /* ======================================================================
-   FILE ASAL: topbar-html.js   (68 baris)   [217/490]
+   FILE ASAL: topbar-html.js   (68 baris)   [218/491]
    ====================================================================== */
 /*
   topbar-html.js
@@ -21604,7 +21804,7 @@ Modul.extend(TopBar, "topbar-html.js", {
 }, "TopBar");
 
 /* ======================================================================
-   FILE ASAL: topbar-init.js   (27 baris)   [218/490]
+   FILE ASAL: topbar-init.js   (27 baris)   [219/491]
    ====================================================================== */
 /*
   topbar-init.js
@@ -21635,7 +21835,7 @@ Modul.extend(TopBar, "topbar-init.js", {
 }, "TopBar");
 
 /* ======================================================================
-   FILE ASAL: toolbar.js   (55 baris)   [219/490]
+   FILE ASAL: toolbar.js   (55 baris)   [220/491]
    ====================================================================== */
 /*
   toolbar.js
@@ -21694,7 +21894,7 @@ const Toolbar = {
 };
 
 /* ======================================================================
-   FILE ASAL: toolbar-bind.js   (58 baris)   [220/490]
+   FILE ASAL: toolbar-bind.js   (58 baris)   [221/491]
    ====================================================================== */
 /*
   toolbar-bind.js
@@ -21756,7 +21956,7 @@ Modul.extend(Toolbar, "toolbar-bind.js", {
 }, "Toolbar");
 
 /* ======================================================================
-   FILE ASAL: toolbar-brushmenu.js   (106 baris)   [221/490]
+   FILE ASAL: toolbar-brushmenu.js   (106 baris)   [222/491]
    ====================================================================== */
 /*
   toolbar-brushmenu.js
@@ -21866,7 +22066,7 @@ Modul.extend(Toolbar, "toolbar-brushmenu.js", {
 }, "Toolbar");
 
 /* ======================================================================
-   FILE ASAL: toolbar-bubble.js   (67 baris)   [222/490]
+   FILE ASAL: toolbar-bubble.js   (67 baris)   [223/491]
    ====================================================================== */
 /*
   toolbar-bubble.js
@@ -21937,7 +22137,7 @@ Modul.extend(Toolbar, "toolbar-bubble.js", {
 }, "Toolbar");
 
 /* ======================================================================
-   FILE ASAL: toolbar-bubbledrag.js   (51 baris)   [223/490]
+   FILE ASAL: toolbar-bubbledrag.js   (51 baris)   [224/491]
    ====================================================================== */
 /*
   toolbar-bubbledrag.js
@@ -21992,7 +22192,7 @@ Modul.extend(Toolbar, "toolbar-bubbledrag.js", {
 }, "Toolbar");
 
 /* ======================================================================
-   FILE ASAL: toolbar-bubblepanel.js   (151 baris)   [224/490]
+   FILE ASAL: toolbar-bubblepanel.js   (151 baris)   [225/491]
    ====================================================================== */
 /*
   toolbar-bubblepanel.js
@@ -22147,7 +22347,7 @@ Modul.extend(Toolbar, "toolbar-bubblepanel.js", {
 }, "Toolbar");
 
 /* ======================================================================
-   FILE ASAL: toolbar-color.js   (20 baris)   [225/490]
+   FILE ASAL: toolbar-color.js   (20 baris)   [226/491]
    ====================================================================== */
 /*
   toolbar-color.js
@@ -22171,7 +22371,7 @@ Modul.extend(Toolbar, "toolbar-color.js", {
 }, "Toolbar");
 
 /* ======================================================================
-   FILE ASAL: toolbar-fill.js   (57 baris)   [226/490]
+   FILE ASAL: toolbar-fill.js   (57 baris)   [227/491]
    ====================================================================== */
 /*
   toolbar-fill.js
@@ -22232,7 +22432,7 @@ Modul.extend(Toolbar, "toolbar-fill.js", {
 }, "Toolbar");
 
 /* ======================================================================
-   FILE ASAL: toolbar-flyout.js   (84 baris)   [227/490]
+   FILE ASAL: toolbar-flyout.js   (84 baris)   [228/491]
    ====================================================================== */
 /*
   toolbar-flyout.js
@@ -22320,7 +22520,7 @@ _handleFlyoutOutsideClick(e) {
 }, "Toolbar");
 
 /* ======================================================================
-   FILE ASAL: toolbar-init.js   (24 baris)   [228/490]
+   FILE ASAL: toolbar-init.js   (24 baris)   [229/491]
    ====================================================================== */
 /*
   toolbar-init.js
@@ -22348,7 +22548,7 @@ Modul.extend(Toolbar, "toolbar-init.js", {
 }, "Toolbar");
 
 /* ======================================================================
-   FILE ASAL: toolbar-render.js   (70 baris)   [229/490]
+   FILE ASAL: toolbar-render.js   (70 baris)   [230/491]
    ====================================================================== */
 /*
   toolbar-render.js
@@ -22422,7 +22622,7 @@ Modul.extend(Toolbar, "toolbar-render.js", {
 }, "Toolbar");
 
 /* ======================================================================
-   FILE ASAL: toolbar-select.js   (108 baris)   [230/490]
+   FILE ASAL: toolbar-select.js   (108 baris)   [231/491]
    ====================================================================== */
 /*
   toolbar-select.js
@@ -22534,7 +22734,7 @@ Modul.extend(Toolbar, "toolbar-select.js", {
 }, "Toolbar");
 
 /* ======================================================================
-   FILE ASAL: toolbar-submenus.js   (61 baris)   [231/490]
+   FILE ASAL: toolbar-submenus.js   (61 baris)   [232/491]
    ====================================================================== */
 /*
   toolbar-submenus.js
@@ -22599,7 +22799,7 @@ Modul.extend(Toolbar, "toolbar-submenus.js", {
 }, "Toolbar");
 
 /* ======================================================================
-   FILE ASAL: toolbar-wand.js   (58 baris)   [232/490]
+   FILE ASAL: toolbar-wand.js   (58 baris)   [233/491]
    ====================================================================== */
 /*
   toolbar-wand.js
@@ -22661,7 +22861,7 @@ Modul.extend(Toolbar, "toolbar-wand.js", {
 }, "Toolbar");
 
 /* ======================================================================
-   FILE ASAL: layer.js   (26 baris)   [233/490]
+   FILE ASAL: layer.js   (26 baris)   [234/491]
    ====================================================================== */
 /*
   layer.js
@@ -22691,7 +22891,7 @@ const LayerPanel = {
 };
 
 /* ======================================================================
-   FILE ASAL: layer-delete.js   (37 baris)   [234/490]
+   FILE ASAL: layer-delete.js   (37 baris)   [235/491]
    ====================================================================== */
 /*
   layer-delete.js
@@ -22732,7 +22932,7 @@ Modul.extend(LayerPanel, "layer-delete.js", {
 }, "LayerPanel");
 
 /* ======================================================================
-   FILE ASAL: layer-duplicate.js   (16 baris)   [235/490]
+   FILE ASAL: layer-duplicate.js   (16 baris)   [236/491]
    ====================================================================== */
 /*
   layer-duplicate.js
@@ -22752,7 +22952,7 @@ Modul.extend(LayerPanel, "layer-duplicate.js", {
 }, "LayerPanel");
 
 /* ======================================================================
-   FILE ASAL: layer-events.js   (21 baris)   [236/490]
+   FILE ASAL: layer-events.js   (21 baris)   [237/491]
    ====================================================================== */
 /*
   layer-events.js
@@ -22777,7 +22977,7 @@ Modul.extend(LayerPanel, "layer-events.js", {
 }, "LayerPanel");
 
 /* ======================================================================
-   FILE ASAL: layer-header.js   (34 baris)   [237/490]
+   FILE ASAL: layer-header.js   (34 baris)   [238/491]
    ====================================================================== */
 /*
   layer-header.js
@@ -22815,7 +23015,7 @@ document.getElementById("layer-add-btn").addEventListener("click", () => {
 }, "LayerPanel");
 
 /* ======================================================================
-   FILE ASAL: layer-init.js   (53 baris)   [238/490]
+   FILE ASAL: layer-init.js   (53 baris)   [239/491]
    ====================================================================== */
 /*
   layer-init.js
@@ -22872,7 +23072,7 @@ Modul.extend(LayerPanel, "layer-init.js", {
 }, "LayerPanel");
 
 /* ======================================================================
-   FILE ASAL: layer-list.js   (159 baris)   [239/490]
+   FILE ASAL: layer-list.js   (159 baris)   [240/491]
    ====================================================================== */
 /*
   layer-list.js
@@ -23035,7 +23235,7 @@ Modul.extend(LayerPanel, "layer-list.js", {
 }, "LayerPanel");
 
 /* ======================================================================
-   FILE ASAL: layer-menu.js   (38 baris)   [240/490]
+   FILE ASAL: layer-menu.js   (38 baris)   [241/491]
    ====================================================================== */
 /*
   layer-menu.js
@@ -23077,7 +23277,7 @@ Modul.extend(LayerPanel, "layer-menu.js", {
 }, "LayerPanel");
 
 /* ======================================================================
-   FILE ASAL: layer-multiselect.js   (55 baris)   [241/490]
+   FILE ASAL: layer-multiselect.js   (55 baris)   [242/491]
    ====================================================================== */
 /*
   layer-multiselect.js
@@ -23136,7 +23336,7 @@ Modul.extend(LayerPanel, "layer-multiselect.js", {
 }, "LayerPanel");
 
 /* ======================================================================
-   FILE ASAL: layer-props.js   (128 baris)   [242/490]
+   FILE ASAL: layer-props.js   (128 baris)   [243/491]
    ====================================================================== */
 /*
   layer-props.js
@@ -23268,7 +23468,7 @@ Modul.extend(LayerPanel, "layer-props.js", {
 }, "LayerPanel");
 
 /* ======================================================================
-   FILE ASAL: layer-reorder.js   (139 baris)   [243/490]
+   FILE ASAL: layer-reorder.js   (139 baris)   [244/491]
    ====================================================================== */
 /*
   layer-reorder.js
@@ -23411,7 +23611,7 @@ bindLongPress(item, layer) {
 }, "LayerPanel");
 
 /* ======================================================================
-   FILE ASAL: layer-scroll.js   (53 baris)   [244/490]
+   FILE ASAL: layer-scroll.js   (53 baris)   [245/491]
    ====================================================================== */
 /*
   layer-scroll.js
@@ -23468,7 +23668,7 @@ Modul.extend(LayerPanel, "layer-scroll.js", {
 }, "LayerPanel");
 
 /* ======================================================================
-   FILE ASAL: layer-select.js   (26 baris)   [245/490]
+   FILE ASAL: layer-select.js   (26 baris)   [246/491]
    ====================================================================== */
 /*
   layer-select.js
@@ -23498,7 +23698,7 @@ Modul.extend(LayerPanel, "layer-select.js", {
 }, "LayerPanel");
 
 /* ======================================================================
-   FILE ASAL: layer-thumbs.js   (37 baris)   [246/490]
+   FILE ASAL: layer-thumbs.js   (37 baris)   [247/491]
    ====================================================================== */
 /*
   layer-thumbs.js
@@ -23539,7 +23739,7 @@ Modul.extend(LayerPanel, "layer-thumbs.js", {
 }, "LayerPanel");
 
 /* ======================================================================
-   FILE ASAL: layer-timelinebtn.js   (63 baris)   [247/490]
+   FILE ASAL: layer-timelinebtn.js   (63 baris)   [248/491]
    ====================================================================== */
 /*
   layer-timelinebtn.js
@@ -23606,7 +23806,7 @@ Modul.extend(LayerPanel, "layer-timelinebtn.js", {
 }, "LayerPanel");
 
 /* ======================================================================
-   FILE ASAL: layer-toggles.js   (48 baris)   [248/490]
+   FILE ASAL: layer-toggles.js   (48 baris)   [249/491]
    ====================================================================== */
 /*
   layer-toggles.js
@@ -23658,7 +23858,7 @@ Modul.extend(LayerPanel, "layer-toggles.js", {
 }, "LayerPanel");
 
 /* ======================================================================
-   FILE ASAL: props-blend.js   (42 baris)   [249/490]
+   FILE ASAL: props-blend.js   (42 baris)   [250/491]
    ====================================================================== */
 /*
   props-blend.js
@@ -23704,7 +23904,7 @@ Modul.extend(LayerPanel, "props-blend.js", {
 }, "LayerPanel");
 
 /* ======================================================================
-   FILE ASAL: props-clip.js   (28 baris)   [250/490]
+   FILE ASAL: props-clip.js   (28 baris)   [251/491]
    ====================================================================== */
 /*
   props-clip.js
@@ -23736,7 +23936,7 @@ Modul.extend(LayerPanel, "props-clip.js", {
 }, "LayerPanel");
 
 /* ======================================================================
-   FILE ASAL: props-filter.js   (58 baris)   [251/490]
+   FILE ASAL: props-filter.js   (58 baris)   [252/491]
    ====================================================================== */
 /*
   props-filter.js
@@ -23798,7 +23998,7 @@ Modul.extend(LayerPanel, "props-filter.js", {
 }, "LayerPanel");
 
 /* ======================================================================
-   FILE ASAL: props-lock.js   (50 baris)   [252/490]
+   FILE ASAL: props-lock.js   (50 baris)   [253/491]
    ====================================================================== */
 /*
   props-lock.js
@@ -23852,7 +24052,7 @@ Modul.extend(LayerPanel, "props-lock.js", {
 }, "LayerPanel");
 
 /* ======================================================================
-   FILE ASAL: props-opacity.js   (33 baris)   [253/490]
+   FILE ASAL: props-opacity.js   (33 baris)   [254/491]
    ====================================================================== */
 /*
   props-opacity.js
@@ -23889,7 +24089,7 @@ Modul.extend(LayerPanel, "props-opacity.js", {
 }, "LayerPanel");
 
 /* ======================================================================
-   FILE ASAL: history-clone.js   (83 baris)   [254/490]
+   FILE ASAL: history-clone.js   (83 baris)   [255/491]
    ====================================================================== */
 /*
   history-clone.js
@@ -23976,7 +24176,7 @@ function historyMetaSignature(meta) {
 }
 
 /* ======================================================================
-   FILE ASAL: history.js   (26 baris)   [255/490]
+   FILE ASAL: history.js   (26 baris)   [256/491]
    ====================================================================== */
 /*
   history.js
@@ -24006,7 +24206,7 @@ const HistoryEngine = {
 };
 
 /* ======================================================================
-   FILE ASAL: history-hook.js   (94 baris)   [256/490]
+   FILE ASAL: history-hook.js   (94 baris)   [257/491]
    ====================================================================== */
 /*
   history-hook.js
@@ -24104,7 +24304,7 @@ if (typeof EventBus !== "undefined") {
 }
 
 /* ======================================================================
-   FILE ASAL: history-snapshot.js   (154 baris)   [257/490]
+   FILE ASAL: history-snapshot.js   (154 baris)   [258/491]
    ====================================================================== */
 /*
   history-snapshot.js
@@ -24262,7 +24462,7 @@ Modul.extend(HistoryEngine, "history-snapshot.js", {
 }, "HistoryEngine");
 
 /* ======================================================================
-   FILE ASAL: history-budget.js   (48 baris)   [258/490]
+   FILE ASAL: history-budget.js   (48 baris)   [259/491]
    ====================================================================== */
 /*
   history-budget.js
@@ -24314,7 +24514,7 @@ Modul.extend(HistoryEngine, "history-budget.js", {
 }, "HistoryEngine");
 
 /* ======================================================================
-   FILE ASAL: history-patch.js   (128 baris)   [259/490]
+   FILE ASAL: history-patch.js   (128 baris)   [260/491]
    ====================================================================== */
 /*
   history-patch.js
@@ -24446,7 +24646,7 @@ Modul.extend(HistoryEngine, "history-patch.js", {
 }, "HistoryEngine");
 
 /* ======================================================================
-   FILE ASAL: history-buttons.js   (22 baris)   [260/490]
+   FILE ASAL: history-buttons.js   (23 baris)   [261/491]
    ====================================================================== */
 /*
   history-buttons.js
@@ -24462,8 +24662,9 @@ Modul.extend(HistoryEngine, "history-buttons.js", {
     const undoBtn = document.getElementById("topbar-undo");
     const redoBtn = document.getElementById("topbar-redo");
     const lt = typeof LassoEngine !== "undefined" && LassoEngine.phase === "transform";
-    const canUndo = this.undoStack.length > 0 || (lt && LassoEngine._tfHist.length > 0);
-    const canRedo = this.redoStack.length > 0 || (lt && LassoEngine._tfRedo.length > 0);
+    const pl = typeof PolylineEngine !== "undefined" ? PolylineEngine : null;
+    const canUndo = this.undoStack.length > 0 || (lt && LassoEngine._tfHist.length > 0) || !!(pl && pl.canUndo());
+    const canRedo = this.redoStack.length > 0 || (lt && LassoEngine._tfRedo.length > 0) || !!(pl && pl.canRedo());
     if (undoBtn) undoBtn.disabled = this.isRestoring || !canUndo;
     if (redoBtn) redoBtn.disabled = this.isRestoring || !canRedo;
     if (undoBtn) undoBtn.classList.toggle("topbar-btn-processing", this.isRestoring);
@@ -24472,7 +24673,7 @@ Modul.extend(HistoryEngine, "history-buttons.js", {
 }, "HistoryEngine");
 
 /* ======================================================================
-   FILE ASAL: history-restore.js   (196 baris)   [261/490]
+   FILE ASAL: history-restore.js   (196 baris)   [262/491]
    ====================================================================== */
 /*
   history-restore.js
@@ -24672,7 +24873,7 @@ Modul.extend(HistoryEngine, "history-restore.js", {
 }, "HistoryEngine");
 
 /* ======================================================================
-   FILE ASAL: history-persist.js   (52 baris)   [262/490]
+   FILE ASAL: history-persist.js   (52 baris)   [263/491]
    ====================================================================== */
 /*
   history-persist.js
@@ -24728,7 +24929,7 @@ Modul.extend(HistoryEngine, "history-persist.js", {
 }, "HistoryEngine");
 
 /* ======================================================================
-   FILE ASAL: history-undo.js   (98 baris)   [263/490]
+   FILE ASAL: history-undo.js   (98 baris)   [264/491]
    ====================================================================== */
 /*
   history-undo.js
@@ -24830,7 +25031,7 @@ Modul.extend(HistoryEngine, "history-undo.js", {
 }, "HistoryEngine");
 
 /* ======================================================================
-   FILE ASAL: history-disk.js   (220 baris)   [264/490]
+   FILE ASAL: history-disk.js   (220 baris)   [265/491]
    ====================================================================== */
 /*
   history-disk.js
@@ -25054,7 +25255,7 @@ if (typeof FinalizationRegistry !== "undefined") {
 HistoryEngine._diskInit();
 
 /* ======================================================================
-   FILE ASAL: history-panel.js   (100 baris)   [265/490]
+   FILE ASAL: history-panel.js   (100 baris)   [266/491]
    ====================================================================== */
 /*
   history-panel.js
@@ -25158,7 +25359,7 @@ const HistoryPanel = {
 };
 
 /* ======================================================================
-   FILE ASAL: zoom.js   (38 baris)   [266/490]
+   FILE ASAL: zoom.js   (38 baris)   [267/491]
    ====================================================================== */
 /*
   zoom.js
@@ -25200,7 +25401,7 @@ scale: 1,
 };
 
 /* ======================================================================
-   FILE ASAL: zoom-pan.js   (48 baris)   [267/490]
+   FILE ASAL: zoom-pan.js   (48 baris)   [268/491]
    ====================================================================== */
 /*
   zoom-pan.js
@@ -25252,7 +25453,7 @@ Modul.extend(ZoomEngine, "zoom-pan.js", {
 }, "ZoomEngine");
 
 /* ======================================================================
-   FILE ASAL: zoom-pinch.js   (143 baris)   [268/490]
+   FILE ASAL: zoom-pinch.js   (143 baris)   [269/491]
    ====================================================================== */
 /*
   zoom-pinch.js
@@ -25399,7 +25600,7 @@ Modul.extend(ZoomEngine, "zoom-pinch.js", {
 }, "ZoomEngine");
 
 /* ======================================================================
-   FILE ASAL: zoom-transform.js   (58 baris)   [269/490]
+   FILE ASAL: zoom-transform.js   (58 baris)   [270/491]
    ====================================================================== */
 /*
   zoom-transform.js
@@ -25461,7 +25662,7 @@ Modul.extend(ZoomEngine, "zoom-transform.js", {
 }, "ZoomEngine");
 
 /* ======================================================================
-   FILE ASAL: zoom-indicator.js   (33 baris)   [270/490]
+   FILE ASAL: zoom-indicator.js   (33 baris)   [271/491]
    ====================================================================== */
 /*
   zoom-indicator.js
@@ -25498,7 +25699,7 @@ Modul.extend(ZoomEngine, "zoom-indicator.js", {
 }, "ZoomEngine");
 
 /* ======================================================================
-   FILE ASAL: zoom-reset.js   (33 baris)   [271/490]
+   FILE ASAL: zoom-reset.js   (33 baris)   [272/491]
    ====================================================================== */
 /*
   zoom-reset.js
@@ -25535,7 +25736,7 @@ const ZoomResetButton = {
 document.addEventListener("DOMContentLoaded", () => ZoomResetButton.init());
 
 /* ======================================================================
-   FILE ASAL: canvas.js   (114 baris)   [272/490]
+   FILE ASAL: canvas.js   (114 baris)   [273/491]
    ====================================================================== */
 /*
   canvas.js
@@ -25653,7 +25854,7 @@ layerCanvases: {},
 };
 
 /* ======================================================================
-   FILE ASAL: canvas-events.js   (93 baris)   [273/490]
+   FILE ASAL: canvas-events.js   (93 baris)   [274/491]
    ====================================================================== */
 /*
   canvas-events.js
@@ -25750,7 +25951,7 @@ EventBus.on("layer:added", () => this.compositeAll());
 }, "CanvasEngine");
 
 /* ======================================================================
-   FILE ASAL: canvas-input.js   (70 baris)   [274/490]
+   FILE ASAL: canvas-input.js   (70 baris)   [275/491]
    ====================================================================== */
 /*
   canvas-input.js
@@ -25824,7 +26025,7 @@ bindPointerEvents() {
 }, "CanvasEngine");
 ;
 /* ======================================================================
-   FILE ASAL: canvas-input-guard.js   (87 baris)   [275/490]
+   FILE ASAL: canvas-input-guard.js   (87 baris)   [276/491]
    ====================================================================== */
 /*
   canvas-input-guard.js
@@ -25915,7 +26116,7 @@ Modul.extend(CanvasEngine, "canvas-input-guard.js", {
 })();
 
 /* ======================================================================
-   FILE ASAL: canvas-tap.js   (93 baris)   [276/490]
+   FILE ASAL: canvas-tap.js   (93 baris)   [277/491]
    ====================================================================== */
 /*
   canvas-tap.js
@@ -26012,7 +26213,7 @@ Modul.extend(CanvasEngine, "canvas-tap.js", {
 }, "CanvasEngine");
 
 /* ======================================================================
-   FILE ASAL: canvas-coords.js   (125 baris)   [277/490]
+   FILE ASAL: canvas-coords.js   (125 baris)   [278/491]
    ====================================================================== */
 /*
   canvas-coords.js
@@ -26141,7 +26342,7 @@ getTouchRadius() {
 }, "CanvasEngine");
 
 /* ======================================================================
-   FILE ASAL: canvas-pressure.js   (24 baris)   [278/490]
+   FILE ASAL: canvas-pressure.js   (24 baris)   [279/491]
    ====================================================================== */
 /*
   canvas-pressure.js
@@ -26169,7 +26370,7 @@ Modul.extend(CanvasEngine, "canvas-pressure.js", {
 }, "CanvasEngine");
 
 /* ======================================================================
-   FILE ASAL: canvas-active.js   (37 baris)   [279/490]
+   FILE ASAL: canvas-active.js   (37 baris)   [280/491]
    ====================================================================== */
 /*
   canvas-active.js
@@ -26210,7 +26411,7 @@ Modul.extend(CanvasEngine, "canvas-active.js", {
 }, "CanvasEngine");
 
 /* ======================================================================
-   FILE ASAL: canvas-input-route.js   (253 baris)   [280/490]
+   FILE ASAL: canvas-input-route.js   (261 baris)   [281/491]
    ====================================================================== */
 /*
   canvas-input-route.js
@@ -26306,6 +26507,12 @@ Modul.extend(CanvasEngine, "canvas-input-route.js", {
       return;
     }
 
+    // Garis sambung (Polyline): ketukan di Kuas jadi titik, bukan goresan.
+    if (this.activeTool === "brush" && typeof PolylineEngine !== "undefined" && PolylineEngine.enabled) {
+      PolylineEngine.handlePointerDown(e);
+      return;
+    }
+
     // Brush/Eraser/Smudge: sentuhan tepat di titik handle penggaris = geser/ubah ukuran penggaris, bukan menggambar.
     if (RulerEngine.grabFromDrawTool(e)) { this._rulerGrab = true; return; }
 
@@ -26379,6 +26586,7 @@ Modul.extend(CanvasEngine, "canvas-input-route.js", {
       return;
     }
 
+    if (this.activeTool === "brush" && typeof PolylineEngine !== "undefined" && PolylineEngine.enabled) { PolylineEngine.handlePointerMove(e); return; }
     if (this._rulerGrab) { RulerEngine.handlePointerMove(e); return; }   // lagi menyeret handle penggaris dari tool menggambar
 
     if (!this.isDrawing) return;
@@ -26456,6 +26664,7 @@ async handlePointerUp(e) {
       return;
     }
 
+    if (this.activeTool === "brush" && typeof PolylineEngine !== "undefined" && PolylineEngine.enabled) { PolylineEngine.handlePointerUp(); return; }
     if (!this.isDrawing) return;
     this.isDrawing = false;
     if (this._readyForStroke) {
@@ -26467,7 +26676,7 @@ async handlePointerUp(e) {
 }, "CanvasEngine");
 
 /* ======================================================================
-   FILE ASAL: canvas-layerstore.js   (104 baris)   [281/490]
+   FILE ASAL: canvas-layerstore.js   (104 baris)   [282/491]
    ====================================================================== */
 /*
   canvas-layerstore.js
@@ -26575,7 +26784,7 @@ Modul.extend(CanvasEngine, "canvas-layerstore.js", {
 }, "CanvasEngine");
 
 /* ======================================================================
-   FILE ASAL: canvas-layerdecode.js   (104 baris)   [282/490]
+   FILE ASAL: canvas-layerdecode.js   (104 baris)   [283/491]
    ====================================================================== */
 /*
   canvas-layerdecode.js
@@ -26683,7 +26892,7 @@ Modul.extend(CanvasEngine, "canvas-layerdecode.js", {
 }, "CanvasEngine");
 
 /* ======================================================================
-   FILE ASAL: canvas-layerlive.js   (81 baris)   [283/490]
+   FILE ASAL: canvas-layerlive.js   (81 baris)   [284/491]
    ====================================================================== */
 /*
   canvas-layerlive.js
@@ -26768,7 +26977,7 @@ waitForLayersReady(project) {
 }, "CanvasEngine");
 
 /* ======================================================================
-   FILE ASAL: canvas-layerencode.js   (49 baris)   [284/490]
+   FILE ASAL: canvas-layerencode.js   (49 baris)   [285/491]
    ====================================================================== */
 /*
   canvas-layerencode.js
@@ -26821,7 +27030,7 @@ Modul.extend(CanvasEngine, "canvas-layerencode.js", {
 }, "CanvasEngine");
 
 /* ======================================================================
-   FILE ASAL: canvas-layerfilter.js   (62 baris)   [285/490]
+   FILE ASAL: canvas-layerfilter.js   (62 baris)   [286/491]
    ====================================================================== */
 /*
   canvas-layerfilter.js
@@ -26887,7 +27096,7 @@ Modul.extend(CanvasEngine, "canvas-layerfilter.js", {
 }, "CanvasEngine");
 
 /* ======================================================================
-   FILE ASAL: canvas-layerdraw.js   (62 baris)   [286/490]
+   FILE ASAL: canvas-layerdraw.js   (62 baris)   [287/491]
    ====================================================================== */
 /*
   canvas-layerdraw.js
@@ -26953,7 +27162,7 @@ Modul.extend(CanvasEngine, "canvas-layerdraw.js", {
 }, "CanvasEngine");
 
 /* ======================================================================
-   FILE ASAL: canvas-clip.js   (89 baris)   [287/490]
+   FILE ASAL: canvas-clip.js   (89 baris)   [288/491]
    ====================================================================== */
 /*
   canvas-clip.js
@@ -27046,7 +27255,7 @@ Modul.extend(CanvasEngine, "canvas-clip.js", {
 }, "CanvasEngine");
 
 /* ======================================================================
-   FILE ASAL: canvas-compose.js   (185 baris)   [288/490]
+   FILE ASAL: canvas-compose.js   (186 baris)   [289/491]
    ====================================================================== */
 /*
   canvas-compose.js
@@ -27218,6 +27427,7 @@ const soloLayerId = (this.soloLayerId && project.layers.some(l => l.id === this.
     LassoEngine.drawOverlay(this.visibleCtx);
     if (typeof PaintLockEngine !== "undefined") PaintLockEngine.drawOverlay(this.visibleCtx);
     ShapeEngine.drawOverlay(this.visibleCtx);
+    if (typeof PolylineEngine !== "undefined") PolylineEngine.drawOverlay(this.visibleCtx);
     // FITUR BARU: lingkaran penanda ukuran+posisi Brush/Eraser/Smudge
     // (lihat brushcursor.js) -- ditaruh di sini biar sama-sama gak ikut
     // kegambar di hasil export (renderCleanFrame() gak manggil ini).
@@ -27235,7 +27445,7 @@ const soloLayerId = (this.soloLayerId && project.layers.some(l => l.id === this.
 }, "CanvasEngine");
 
 /* ======================================================================
-   FILE ASAL: canvas-frame.js   (70 baris)   [289/490]
+   FILE ASAL: canvas-frame.js   (70 baris)   [290/491]
    ====================================================================== */
 /*
   canvas-frame.js
@@ -27309,7 +27519,7 @@ Modul.extend(CanvasEngine, "canvas-frame.js", {
 }, "CanvasEngine");
 
 /* ======================================================================
-   FILE ASAL: canvas-thumb.js   (43 baris)   [290/490]
+   FILE ASAL: canvas-thumb.js   (43 baris)   [291/491]
    ====================================================================== */
 /*
   canvas-thumb.js
@@ -27356,7 +27566,7 @@ Modul.extend(CanvasEngine, "canvas-thumb.js", {
 }, "CanvasEngine");
 
 /* ======================================================================
-   FILE ASAL: fill-brushregion.js   (96 baris)   [291/490]
+   FILE ASAL: fill-brushregion.js   (96 baris)   [292/491]
    ====================================================================== */
 /*
   fill-brushregion.js
@@ -27456,7 +27666,7 @@ Modul.extend(CanvasEngine, "fill-brushregion.js", {
 }, "CanvasEngine");
 
 /* ======================================================================
-   FILE ASAL: fill-color.js   (35 baris)   [292/490]
+   FILE ASAL: fill-color.js   (35 baris)   [293/491]
    ====================================================================== */
 /*
   fill-color.js
@@ -27495,7 +27705,7 @@ Modul.extend(CanvasEngine, "fill-color.js", {
 }, "CanvasEngine");
 
 /* ======================================================================
-   FILE ASAL: fill-flood.js   (209 baris)   [293/490]
+   FILE ASAL: fill-flood.js   (209 baris)   [294/491]
    ====================================================================== */
 /*
   fill-flood.js
@@ -27708,7 +27918,7 @@ const startIdx = (startY * w + startX) * 4;
 }, "CanvasEngine");
 
 /* ======================================================================
-   FILE ASAL: fill-sample.js   (32 baris)   [294/490]
+   FILE ASAL: fill-sample.js   (32 baris)   [295/491]
    ====================================================================== */
 /*
   fill-sample.js
@@ -27744,7 +27954,7 @@ Modul.extend(CanvasEngine, "fill-sample.js", {
 }, "CanvasEngine");
 
 /* ======================================================================
-   FILE ASAL: mask-bbox.js   (31 baris)   [295/490]
+   FILE ASAL: mask-bbox.js   (31 baris)   [296/491]
    ====================================================================== */
 /*
   mask-bbox.js
@@ -27779,7 +27989,7 @@ Modul.extend(CanvasEngine, "mask-bbox.js", {
 }, "CanvasEngine");
 
 /* ======================================================================
-   FILE ASAL: mask-build-global.js   (65 baris)   [296/490]
+   FILE ASAL: mask-build-global.js   (65 baris)   [297/491]
    ====================================================================== */
 /*
   mask-build-global.js
@@ -27848,7 +28058,7 @@ Modul.extend(CanvasEngine, "mask-build-global.js", {
 }, "CanvasEngine");
 
 /* ======================================================================
-   FILE ASAL: mask-build.js   (110 baris)   [297/490]
+   FILE ASAL: mask-build.js   (110 baris)   [298/491]
    ====================================================================== */
 /*
   mask-build.js
@@ -27962,7 +28172,7 @@ Modul.extend(CanvasEngine, "mask-build.js", {
 }, "CanvasEngine");
 
 /* ======================================================================
-   FILE ASAL: mask-combine.js   (43 baris)   [298/490]
+   FILE ASAL: mask-combine.js   (43 baris)   [299/491]
    ====================================================================== */
 /*
   mask-combine.js
@@ -28009,7 +28219,7 @@ Modul.extend(CanvasEngine, "mask-combine.js", {
 }, "CanvasEngine");
 
 /* ======================================================================
-   FILE ASAL: mask-feather.js   (80 baris)   [299/490]
+   FILE ASAL: mask-feather.js   (80 baris)   [300/491]
    ====================================================================== */
 /*
   mask-feather.js
@@ -28093,7 +28303,7 @@ Modul.extend(CanvasEngine, "mask-feather.js", {
 }, "CanvasEngine");
 
 /* ======================================================================
-   FILE ASAL: mask-invert.js   (27 baris)   [300/490]
+   FILE ASAL: mask-invert.js   (27 baris)   [301/491]
    ====================================================================== */
 /*
   mask-invert.js
@@ -28124,7 +28334,7 @@ Modul.extend(CanvasEngine, "mask-invert.js", {
 }, "CanvasEngine");
 
 /* ======================================================================
-   FILE ASAL: mask-morph.js   (69 baris)   [301/490]
+   FILE ASAL: mask-morph.js   (69 baris)   [302/491]
    ====================================================================== */
 /*
   mask-morph.js
@@ -28197,7 +28407,7 @@ Modul.extend(CanvasEngine, "mask-morph.js", {
 }, "CanvasEngine");
 
 /* ======================================================================
-   FILE ASAL: canvas-onion.js   (39 baris)   [302/490]
+   FILE ASAL: canvas-onion.js   (39 baris)   [303/491]
    ====================================================================== */
 /*
   canvas-onion.js
@@ -28240,7 +28450,7 @@ Modul.extend(CanvasEngine, "canvas-onion.js", {
 }, "CanvasEngine");
 
 /* ======================================================================
-   FILE ASAL: canvas-snapshot.js   (126 baris)   [303/490]
+   FILE ASAL: canvas-snapshot.js   (126 baris)   [304/491]
    ====================================================================== */
 /*
   canvas-snapshot.js
@@ -28370,7 +28580,7 @@ Modul.extend(CanvasEngine, "canvas-snapshot.js", {
 }, "CanvasEngine");
 
 /* ======================================================================
-   FILE ASAL: canvas-flip.js   (23 baris)   [304/490]
+   FILE ASAL: canvas-flip.js   (23 baris)   [305/491]
    ====================================================================== */
 /*
   canvas-flip.js
@@ -28397,7 +28607,7 @@ Modul.extend(CanvasEngine, "canvas-flip.js", {
 }, "CanvasEngine");
 
 /* ======================================================================
-   FILE ASAL: canvas-grid.js   (44 baris)   [305/490]
+   FILE ASAL: canvas-grid.js   (44 baris)   [306/491]
    ====================================================================== */
 /*
   canvas-grid.js
@@ -28445,7 +28655,7 @@ Modul.extend(CanvasEngine, "canvas-grid.js", {
 }, "CanvasEngine");
 
 /* ======================================================================
-   FILE ASAL: selection-all.js   (39 baris)   [306/490]
+   FILE ASAL: selection-all.js   (39 baris)   [307/491]
    ====================================================================== */
 /*
   selection-all.js
@@ -28488,7 +28698,7 @@ Modul.extend(CanvasEngine, "selection-all.js", {
 }, "CanvasEngine");
 
 /* ======================================================================
-   FILE ASAL: selection-meshbutton.js   (97 baris)   [307/490]
+   FILE ASAL: selection-meshbutton.js   (97 baris)   [308/491]
    ====================================================================== */
 /*
   selection-meshbutton.js
@@ -28589,7 +28799,7 @@ Modul.extend(CanvasEngine, "selection-meshbutton.js", {
 }, "CanvasEngine");
 
 /* ======================================================================
-   FILE ASAL: timeline.js   (43 baris)   [308/490]
+   FILE ASAL: timeline.js   (43 baris)   [309/491]
    ====================================================================== */
 /*
   timeline.js
@@ -28636,7 +28846,7 @@ moreMenuOpen: false, // laci "⋮" (Loop/Marker/Durasi&FPS/Zoom) -- ketutup defa
 };
 
 /* ======================================================================
-   FILE ASAL: timeline-init.js   (100 baris)   [309/490]
+   FILE ASAL: timeline-init.js   (100 baris)   [310/491]
    ====================================================================== */
 /*
   timeline-init.js
@@ -28740,7 +28950,7 @@ EventBus.on("project:changed", () => { if (!ProjectStore._suppressUIRender) this
 }, "Timeline");
 
 /* ======================================================================
-   FILE ASAL: timeline-bind.js   (21 baris)   [310/490]
+   FILE ASAL: timeline-bind.js   (21 baris)   [311/491]
    ====================================================================== */
 /*
   timeline-bind.js
@@ -28765,7 +28975,7 @@ Modul.extend(Timeline, "timeline-bind.js", {
 }, "Timeline");
 
 /* ======================================================================
-   FILE ASAL: timeline-toolbar.js   (79 baris)   [311/490]
+   FILE ASAL: timeline-toolbar.js   (79 baris)   [312/491]
    ====================================================================== */
 /*
   timeline-toolbar.js
@@ -28848,7 +29058,7 @@ Modul.extend(Timeline, "timeline-toolbar.js", {
 }, "Timeline");
 
 /* ======================================================================
-   FILE ASAL: timeline-scrub.js   (68 baris)   [312/490]
+   FILE ASAL: timeline-scrub.js   (68 baris)   [313/491]
    ====================================================================== */
 /*
   timeline-scrub.js
@@ -28920,7 +29130,7 @@ Modul.extend(Timeline, "timeline-scrub.js", {
 }, "Timeline");
 
 /* ======================================================================
-   FILE ASAL: timeline-gesture-keyframe.js   (62 baris)   [313/490]
+   FILE ASAL: timeline-gesture-keyframe.js   (62 baris)   [314/491]
    ====================================================================== */
 /*
   timeline-gesture-keyframe.js
@@ -28986,7 +29196,7 @@ Modul.extend(Timeline, "timeline-gesture-keyframe.js", {
 }, "Timeline");
 
 /* ======================================================================
-   FILE ASAL: timeline-gesture-clip.js   (179 baris)   [314/490]
+   FILE ASAL: timeline-gesture-clip.js   (179 baris)   [315/491]
    ====================================================================== */
 /*
   timeline-gesture-clip.js
@@ -29169,7 +29379,7 @@ Modul.extend(Timeline, "timeline-gesture-clip.js", {
 }, "Timeline");
 
 /* ======================================================================
-   FILE ASAL: timeline-gesture-cel.js   (106 baris)   [315/490]
+   FILE ASAL: timeline-gesture-cel.js   (106 baris)   [316/491]
    ====================================================================== */
 /*
   timeline-gesture-cel.js
@@ -29279,7 +29489,7 @@ Modul.extend(Timeline, "timeline-gesture-cel.js", {
 }, "Timeline");
 
 /* ======================================================================
-   FILE ASAL: timeline-gesture-audio.js   (93 baris)   [316/490]
+   FILE ASAL: timeline-gesture-audio.js   (93 baris)   [317/491]
    ====================================================================== */
 /*
   timeline-gesture-audio.js
@@ -29376,7 +29586,7 @@ Modul.extend(Timeline, "timeline-gesture-audio.js", {
 }, "Timeline");
 
 /* ======================================================================
-   FILE ASAL: timeline-gesture-handles.js   (54 baris)   [317/490]
+   FILE ASAL: timeline-gesture-handles.js   (54 baris)   [318/491]
    ====================================================================== */
 /*
   timeline-gesture-handles.js
@@ -29434,7 +29644,7 @@ Modul.extend(Timeline, "timeline-gesture-handles.js", {
 }, "Timeline");
 
 /* ======================================================================
-   FILE ASAL: timeline-play.js   (115 baris)   [318/490]
+   FILE ASAL: timeline-play.js   (115 baris)   [319/491]
    ====================================================================== */
 /*
   timeline-play.js
@@ -29553,7 +29763,7 @@ Modul.extend(Timeline, "timeline-play.js", {
 }, "Timeline");
 
 /* ======================================================================
-   FILE ASAL: timeline-zoomlevel.js   (40 baris)   [319/490]
+   FILE ASAL: timeline-zoomlevel.js   (40 baris)   [320/491]
    ====================================================================== */
 /*
   timeline-zoomlevel.js
@@ -29597,7 +29807,7 @@ Modul.extend(Timeline, "timeline-zoomlevel.js", {
 }, "Timeline");
 
 /* ======================================================================
-   FILE ASAL: timeline-toast.js   (30 baris)   [320/490]
+   FILE ASAL: timeline-toast.js   (30 baris)   [321/491]
    ====================================================================== */
 /*
   timeline-toast.js
@@ -29631,7 +29841,7 @@ Modul.extend(Timeline, "timeline-toast.js", {
 }, "Timeline");
 
 /* ======================================================================
-   FILE ASAL: timeline-render.js   (124 baris)   [321/490]
+   FILE ASAL: timeline-render.js   (124 baris)   [322/491]
    ====================================================================== */
 /*
   timeline-render.js
@@ -29759,7 +29969,7 @@ ${this._renderTracksHtml(project, activeLayerId, pxPerFrame, contentWidth, total
 }, "Timeline");
 
 /* ======================================================================
-   FILE ASAL: timeline-controls.js   (69 baris)   [322/490]
+   FILE ASAL: timeline-controls.js   (69 baris)   [323/491]
    ====================================================================== */
 /*
   timeline-controls.js
@@ -29832,7 +30042,7 @@ Modul.extend(Timeline, "timeline-controls.js", {
 }, "Timeline");
 
 /* ======================================================================
-   FILE ASAL: timeline-ruler.js   (62 baris)   [323/490]
+   FILE ASAL: timeline-ruler.js   (62 baris)   [324/491]
    ====================================================================== */
 /*
   timeline-ruler.js
@@ -29898,7 +30108,7 @@ Modul.extend(Timeline, "timeline-ruler.js", {
 }, "Timeline");
 
 /* ======================================================================
-   FILE ASAL: timeline-loopregion.js   (30 baris)   [324/490]
+   FILE ASAL: timeline-loopregion.js   (30 baris)   [325/491]
    ====================================================================== */
 /*
   timeline-loopregion.js
@@ -29932,7 +30142,7 @@ Modul.extend(Timeline, "timeline-loopregion.js", {
 }, "Timeline");
 
 /* ======================================================================
-   FILE ASAL: timeline-playhead.js   (49 baris)   [325/490]
+   FILE ASAL: timeline-playhead.js   (49 baris)   [326/491]
    ====================================================================== */
 /*
   timeline-playhead.js
@@ -29985,7 +30195,7 @@ Modul.extend(Timeline, "timeline-playhead.js", {
 }, "Timeline");
 
 /* ======================================================================
-   FILE ASAL: timeline-filmstrip.js   (109 baris)   [326/490]
+   FILE ASAL: timeline-filmstrip.js   (109 baris)   [327/491]
    ====================================================================== */
 /*
   timeline-filmstrip.js
@@ -30098,7 +30308,7 @@ Modul.extend(Timeline, "timeline-filmstrip.js", {
 }, "Timeline");
 
 /* ======================================================================
-   FILE ASAL: timeline-clips.js   (122 baris)   [327/490]
+   FILE ASAL: timeline-clips.js   (122 baris)   [328/491]
    ====================================================================== */
 /*
   timeline-clips.js
@@ -30224,7 +30434,7 @@ buildVisibilitySegments(layer, durationFrames) {
 }, "Timeline");
 
 /* ======================================================================
-   FILE ASAL: timeline-tracks.js   (78 baris)   [328/490]
+   FILE ASAL: timeline-tracks.js   (78 baris)   [329/491]
    ====================================================================== */
 /*
   timeline-tracks.js
@@ -30306,7 +30516,7 @@ renderTrackRow(layer, project, isActive, pxPerFrame, totalRowWidth, index) {
 }, "Timeline");
 
 /* ======================================================================
-   FILE ASAL: keyframe-move.js   (55 baris)   [329/490]
+   FILE ASAL: keyframe-move.js   (55 baris)   [330/491]
    ====================================================================== */
 /*
   keyframe-move.js
@@ -30365,7 +30575,7 @@ Modul.extend(Timeline, "keyframe-move.js", {
 }, "Timeline");
 
 /* ======================================================================
-   FILE ASAL: keyframe-add.js   (110 baris)   [330/490]
+   FILE ASAL: keyframe-add.js   (110 baris)   [331/491]
    ====================================================================== */
 /*
   keyframe-add.js
@@ -30479,7 +30689,7 @@ Modul.extend(Timeline, "keyframe-add.js", {
 }, "Timeline");
 
 /* ======================================================================
-   FILE ASAL: keyframe-menu.js   (55 baris)   [331/490]
+   FILE ASAL: keyframe-menu.js   (55 baris)   [332/491]
    ====================================================================== */
 /*
   keyframe-menu.js
@@ -30538,7 +30748,7 @@ Modul.extend(Timeline, "keyframe-menu.js", {
 }, "Timeline");
 
 /* ======================================================================
-   FILE ASAL: keyframe-ease.js   (28 baris)   [332/490]
+   FILE ASAL: keyframe-ease.js   (28 baris)   [333/491]
    ====================================================================== */
 /*
   keyframe-ease.js
@@ -30570,7 +30780,7 @@ Modul.extend(Timeline, "keyframe-ease.js", {
 }, "Timeline");
 
 /* ======================================================================
-   FILE ASAL: keyframe-clipboard.js   (96 baris)   [333/490]
+   FILE ASAL: keyframe-clipboard.js   (96 baris)   [334/491]
    ====================================================================== */
 /*
   keyframe-clipboard.js
@@ -30670,7 +30880,7 @@ Modul.extend(Timeline, "keyframe-clipboard.js", {
 }, "Timeline");
 
 /* ======================================================================
-   FILE ASAL: keyframe-delete.js   (51 baris)   [334/490]
+   FILE ASAL: keyframe-delete.js   (51 baris)   [335/491]
    ====================================================================== */
 /*
   keyframe-delete.js
@@ -30725,7 +30935,7 @@ Modul.extend(Timeline, "keyframe-delete.js", {
 }, "Timeline");
 
 /* ======================================================================
-   FILE ASAL: keyframe-drag.js   (94 baris)   [335/490]
+   FILE ASAL: keyframe-drag.js   (94 baris)   [336/491]
    ====================================================================== */
 /*
   keyframe-drag.js
@@ -30823,7 +31033,7 @@ const project = ProjectStore.getProject();
 }, "Timeline");
 
 /* ======================================================================
-   FILE ASAL: marker-add.js   (31 baris)   [336/490]
+   FILE ASAL: marker-add.js   (31 baris)   [337/491]
    ====================================================================== */
 /*
   marker-add.js
@@ -30858,7 +31068,7 @@ Modul.extend(Timeline, "marker-add.js", {
 }, "Timeline");
 
 /* ======================================================================
-   FILE ASAL: marker-menu.js   (71 baris)   [337/490]
+   FILE ASAL: marker-menu.js   (71 baris)   [338/491]
    ====================================================================== */
 /*
   marker-menu.js
@@ -30933,7 +31143,7 @@ Modul.extend(Timeline, "marker-menu.js", {
 }, "Timeline");
 
 /* ======================================================================
-   FILE ASAL: timeline-settings.js   (64 baris)   [338/490]
+   FILE ASAL: timeline-settings.js   (64 baris)   [339/491]
    ====================================================================== */
 /*
   timeline-settings.js
@@ -31001,7 +31211,7 @@ Modul.extend(Timeline, "timeline-settings.js", {
 }, "Timeline");
 
 /* ======================================================================
-   FILE ASAL: timeline-duration.js   (47 baris)   [339/490]
+   FILE ASAL: timeline-duration.js   (47 baris)   [340/491]
    ====================================================================== */
 /*
   timeline-duration.js
@@ -31052,7 +31262,7 @@ document.addEventListener("pointercancel", up);
 }, "Timeline");
 
 /* ======================================================================
-   FILE ASAL: timeline-loophandle.js   (53 baris)   [340/490]
+   FILE ASAL: timeline-loophandle.js   (53 baris)   [341/491]
    ====================================================================== */
 /*
   timeline-loophandle.js
@@ -31109,7 +31319,7 @@ Modul.extend(Timeline, "timeline-loophandle.js", {
 }, "Timeline");
 
 /* ======================================================================
-   FILE ASAL: clip-move.js   (98 baris)   [341/490]
+   FILE ASAL: clip-move.js   (98 baris)   [342/491]
    ====================================================================== */
 /*
   clip-move.js
@@ -31211,7 +31421,7 @@ const up = () => {
 }, "Timeline");
 
 /* ======================================================================
-   FILE ASAL: clip-trim.js   (135 baris)   [342/490]
+   FILE ASAL: clip-trim.js   (135 baris)   [343/491]
    ====================================================================== */
 /*
   clip-trim.js
@@ -31350,7 +31560,7 @@ startLayerTrimDrag(e, layerId, edge) {
 }, "Timeline");
 
 /* ======================================================================
-   FILE ASAL: clip-snap.js   (44 baris)   [343/490]
+   FILE ASAL: clip-snap.js   (44 baris)   [344/491]
    ====================================================================== */
 /*
   clip-snap.js
@@ -31398,7 +31608,7 @@ Modul.extend(Timeline, "clip-snap.js", {
 }, "Timeline");
 
 /* ======================================================================
-   FILE ASAL: clip-frontshift.js   (142 baris)   [344/490]
+   FILE ASAL: clip-frontshift.js   (142 baris)   [345/491]
    ====================================================================== */
 /*
   clip-frontshift.js
@@ -31544,7 +31754,7 @@ Modul.extend(Timeline, "clip-frontshift.js", {
 }, "Timeline");
 
 /* ======================================================================
-   FILE ASAL: audiolane-render.js   (85 baris)   [345/490]
+   FILE ASAL: audiolane-render.js   (85 baris)   [346/491]
    ====================================================================== */
 /*
   audiolane-render.js
@@ -31633,7 +31843,7 @@ Modul.extend(Timeline, "audiolane-render.js", {
 }, "Timeline");
 
 /* ======================================================================
-   FILE ASAL: audiolane-waveform.js   (48 baris)   [346/490]
+   FILE ASAL: audiolane-waveform.js   (48 baris)   [347/491]
    ====================================================================== */
 /*
   audiolane-waveform.js
@@ -31685,7 +31895,7 @@ Modul.extend(Timeline, "audiolane-waveform.js", {
 }, "Timeline");
 
 /* ======================================================================
-   FILE ASAL: audiolane-drag.js   (105 baris)   [347/490]
+   FILE ASAL: audiolane-drag.js   (105 baris)   [348/491]
    ====================================================================== */
 /*
   audiolane-drag.js
@@ -31794,7 +32004,7 @@ Modul.extend(Timeline, "audiolane-drag.js", {
 }, "Timeline");
 
 /* ======================================================================
-   FILE ASAL: audiolane-trim.js   (80 baris)   [348/490]
+   FILE ASAL: audiolane-trim.js   (80 baris)   [349/491]
    ====================================================================== */
 /*
   audiolane-trim.js
@@ -31878,7 +32088,7 @@ Modul.extend(Timeline, "audiolane-trim.js", {
 }, "Timeline");
 
 /* ======================================================================
-   FILE ASAL: cel-gallery.js   (105 baris)   [349/490]
+   FILE ASAL: cel-gallery.js   (105 baris)   [350/491]
    ====================================================================== */
 /*
   cel-gallery.js
@@ -31987,7 +32197,7 @@ showCelGalleryModal(layerId) {
 }, "Timeline");
 
 /* ======================================================================
-   FILE ASAL: cel-new.js   (32 baris)   [350/490]
+   FILE ASAL: cel-new.js   (32 baris)   [351/491]
    ====================================================================== */
 /*
   cel-new.js
@@ -32023,7 +32233,7 @@ Modul.extend(Timeline, "cel-new.js", {
 }, "Timeline");
 
 /* ======================================================================
-   FILE ASAL: cel-duplicate.js   (31 baris)   [351/490]
+   FILE ASAL: cel-duplicate.js   (31 baris)   [352/491]
    ====================================================================== */
 /*
   cel-duplicate.js
@@ -32058,7 +32268,7 @@ Modul.extend(Timeline, "cel-duplicate.js", {
 }, "Timeline");
 
 /* ======================================================================
-   FILE ASAL: cel-clear.js   (36 baris)   [352/490]
+   FILE ASAL: cel-clear.js   (36 baris)   [353/491]
    ====================================================================== */
 /*
   cel-clear.js
@@ -32098,7 +32308,7 @@ Modul.extend(Timeline, "cel-clear.js", {
 }, "Timeline");
 
 /* ======================================================================
-   FILE ASAL: celzoom-layout.js   (55 baris)   [353/490]
+   FILE ASAL: celzoom-layout.js   (55 baris)   [354/491]
    ====================================================================== */
 /*
   celzoom-layout.js
@@ -32157,7 +32367,7 @@ Modul.extend(Timeline, "celzoom-layout.js", {
 }, "Timeline");
 
 /* ======================================================================
-   FILE ASAL: celzoom-playhead.js   (66 baris)   [354/490]
+   FILE ASAL: celzoom-playhead.js   (66 baris)   [355/491]
    ====================================================================== */
 /*
   celzoom-playhead.js
@@ -32227,7 +32437,7 @@ Modul.extend(Timeline, "celzoom-playhead.js", {
 }, "Timeline");
 
 /* ======================================================================
-   FILE ASAL: celzoom-solo.js   (111 baris)   [355/490]
+   FILE ASAL: celzoom-solo.js   (111 baris)   [356/491]
    ====================================================================== */
 /*
   celzoom-solo.js
@@ -32342,7 +32552,7 @@ Modul.extend(Timeline, "celzoom-solo.js", {
 }, "Timeline");
 
 /* ======================================================================
-   FILE ASAL: seqwarp.js   (16 baris)   [356/490]
+   FILE ASAL: seqwarp.js   (16 baris)   [357/491]
    ====================================================================== */
 /*
   seqwarp.js
@@ -32362,7 +32572,7 @@ const SeqWarp = {
 };
 
 /* ======================================================================
-   FILE ASAL: seqwarp-attach.js   (27 baris)   [357/490]
+   FILE ASAL: seqwarp-attach.js   (27 baris)   [358/491]
    ====================================================================== */
 /*
   seqwarp-attach.js
@@ -32393,7 +32603,7 @@ Modul.extend(SeqWarp, "seqwarp-attach.js", {
 }, "SeqWarp");
 
 /* ======================================================================
-   FILE ASAL: seqwarp-draw.js   (100 baris)   [358/490]
+   FILE ASAL: seqwarp-draw.js   (100 baris)   [359/491]
    ====================================================================== */
 /*
   seqwarp-draw.js
@@ -32497,7 +32707,7 @@ Modul.extend(SeqWarp, "seqwarp-draw.js", {
 }, "SeqWarp");
 
 /* ======================================================================
-   FILE ASAL: stroke-begin.js   (240 baris)   [359/490]
+   FILE ASAL: stroke-begin.js   (240 baris)   [360/491]
    ====================================================================== */
 /*
   stroke-begin.js
@@ -32741,7 +32951,7 @@ Modul.extend(CanvasEngine, "stroke-begin.js", {
 }, "CanvasEngine");
 
 /* ======================================================================
-   FILE ASAL: stroke-move.js   (147 baris)   [360/490]
+   FILE ASAL: stroke-move.js   (147 baris)   [361/491]
    ====================================================================== */
 /*
   stroke-move.js
@@ -32892,7 +33102,7 @@ if (!this._compositeRAFPending) {
 }, "CanvasEngine");
 
 /* ======================================================================
-   FILE ASAL: stroke-taper.js   (128 baris)   [361/490]
+   FILE ASAL: stroke-taper.js   (128 baris)   [362/491]
    ====================================================================== */
 /*
   stroke-taper.js
@@ -33024,7 +33234,7 @@ Modul.extend(CanvasEngine, "stroke-taper.js", {
 }, "CanvasEngine");
 
 /* ======================================================================
-   FILE ASAL: stroke-eraser.js   (21 baris)   [362/490]
+   FILE ASAL: stroke-eraser.js   (21 baris)   [363/491]
    ====================================================================== */
 /*
   stroke-eraser.js
@@ -33049,7 +33259,7 @@ Modul.extend(CanvasEngine, "stroke-eraser.js", {
 }, "CanvasEngine");
 
 /* ======================================================================
-   FILE ASAL: stroke-brush.js   (67 baris)   [363/490]
+   FILE ASAL: stroke-brush.js   (67 baris)   [364/491]
    ====================================================================== */
 /*
   stroke-brush.js
@@ -33120,7 +33330,7 @@ Modul.extend(CanvasEngine, "stroke-brush.js", {
 }, "CanvasEngine");
 
 /* ======================================================================
-   FILE ASAL: stroke-smudge.js   (116 baris)   [364/490]
+   FILE ASAL: stroke-smudge.js   (116 baris)   [365/491]
    ====================================================================== */
 /*
   stroke-smudge.js
@@ -33240,7 +33450,7 @@ Modul.extend(CanvasEngine, "stroke-smudge.js", {
 }, "CanvasEngine");
 
 /* ======================================================================
-   FILE ASAL: stroke-alphalock.js   (90 baris)   [365/490]
+   FILE ASAL: stroke-alphalock.js   (90 baris)   [366/491]
    ====================================================================== */
 /*
   stroke-alphalock.js
@@ -33334,7 +33544,7 @@ Modul.extend(CanvasEngine, "stroke-alphalock.js", {
 }, "CanvasEngine");
 
 /* ======================================================================
-   FILE ASAL: stroke-tapdot.js   (54 baris)   [366/490]
+   FILE ASAL: stroke-tapdot.js   (54 baris)   [367/491]
    ====================================================================== */
 /*
   stroke-tapdot.js
@@ -33392,7 +33602,7 @@ Modul.extend(CanvasEngine, "stroke-tapdot.js", {
 }, "CanvasEngine");
 
 /* ======================================================================
-   FILE ASAL: stroke-cancel.js   (67 baris)   [367/490]
+   FILE ASAL: stroke-cancel.js   (67 baris)   [368/491]
    ====================================================================== */
 /*
   stroke-cancel.js
@@ -33463,7 +33673,7 @@ cancelActiveStroke() {
 }, "CanvasEngine");
 
 /* ======================================================================
-   FILE ASAL: stroke-finish.js   (190 baris)   [368/490]
+   FILE ASAL: stroke-finish.js   (190 baris)   [369/491]
    ====================================================================== */
 /*
   stroke-finish.js
@@ -33657,7 +33867,7 @@ Modul.extend(CanvasEngine, "stroke-finish.js", {
 }, "CanvasEngine");
 
 /* ======================================================================
-   FILE ASAL: stroke-save.js   (111 baris)   [369/490]
+   FILE ASAL: stroke-save.js   (111 baris)   [370/491]
    ====================================================================== */
 /*
   stroke-save.js
@@ -33772,7 +33982,7 @@ Modul.extend(CanvasEngine, "stroke-save.js", {
 }, "CanvasEngine");
 
 /* ======================================================================
-   FILE ASAL: tool-move.js   (71 baris)   [370/490]
+   FILE ASAL: tool-move.js   (71 baris)   [371/491]
    ====================================================================== */
 /*
   tool-move.js
@@ -33847,7 +34057,7 @@ Modul.extend(CanvasEngine, "tool-move.js", {
 }, "CanvasEngine");
 
 /* ======================================================================
-   FILE ASAL: tool-movegroup.js   (34 baris)   [371/490]
+   FILE ASAL: tool-movegroup.js   (34 baris)   [372/491]
    ====================================================================== */
 /*
   tool-movegroup.js
@@ -33885,7 +34095,7 @@ Modul.extend(CanvasEngine, "tool-movegroup.js", {
 }, "CanvasEngine");
 
 /* ======================================================================
-   FILE ASAL: canvas-anim.js   (95 baris)   [372/490]
+   FILE ASAL: canvas-anim.js   (95 baris)   [373/491]
    ====================================================================== */
 /*
   canvas-anim.js
@@ -33984,7 +34194,7 @@ getEffectiveVisibility(layer, currentFrame) {
 }, "CanvasEngine");
 
 /* ======================================================================
-   FILE ASAL: brushsize.js   (20 baris)   [373/490]
+   FILE ASAL: brushsize.js   (20 baris)   [374/491]
    ====================================================================== */
 /*
   brushsize.js
@@ -34008,7 +34218,7 @@ const BrushSizeEngine = {
 };
 
 /* ======================================================================
-   FILE ASAL: brushsize-value.js   (58 baris)   [374/490]
+   FILE ASAL: brushsize-value.js   (58 baris)   [375/491]
    ====================================================================== */
 /*
   brushsize-value.js
@@ -34070,7 +34280,7 @@ Modul.extend(BrushSizeEngine, "brushsize-value.js", {
 }, "BrushSizeEngine");
 
 /* ======================================================================
-   FILE ASAL: brushsize-popover.js   (201 baris)   [375/490]
+   FILE ASAL: brushsize-popover.js   (201 baris)   [376/491]
    ====================================================================== */
 /*
   brushsize-popover.js
@@ -34275,7 +34485,7 @@ Modul.extend(BrushSizeEngine, "brushsize-popover.js", {
 }, "BrushSizeEngine");
 
 /* ======================================================================
-   FILE ASAL: brushsize-stabilizer.js   (77 baris)   [376/490]
+   FILE ASAL: brushsize-stabilizer.js   (77 baris)   [377/491]
    ====================================================================== */
 /*
   brushsize-stabilizer.js
@@ -34356,7 +34566,7 @@ Modul.extend(BrushSizeEngine, "brushsize-stabilizer.js", {
 }, "BrushSizeEngine");
 ;
 /* ======================================================================
-   FILE ASAL: liquify.js   (659 baris)   [377/490]
+   FILE ASAL: liquify.js   (659 baris)   [378/491]
    ====================================================================== */
 /*
   liquify.js
@@ -35019,7 +35229,7 @@ Modul.extend(BrushSizeEngine, "brushsize-stabilizer.js", {
 })();
 
 /* ======================================================================
-   FILE ASAL: custombrush.js   (32 baris)   [378/490]
+   FILE ASAL: custombrush.js   (32 baris)   [379/491]
    ====================================================================== */
 /*
   custombrush.js
@@ -35055,7 +35265,7 @@ const CustomBrushEngine = {
 };
 
 /* ======================================================================
-   FILE ASAL: custombrush-texture.js   (114 baris)   [379/490]
+   FILE ASAL: custombrush-texture.js   (114 baris)   [380/491]
    ====================================================================== */
 /*
   custombrush-texture.js
@@ -35173,7 +35383,7 @@ Modul.extend(CustomBrushEngine, "custombrush-texture.js", {
 }, "CustomBrushEngine");
 
 /* ======================================================================
-   FILE ASAL: custombrush-mask.js   (98 baris)   [380/490]
+   FILE ASAL: custombrush-mask.js   (98 baris)   [381/491]
    ====================================================================== */
 /*
   custombrush-mask.js
@@ -35275,7 +35485,7 @@ Modul.extend(CustomBrushEngine, "custombrush-mask.js", {
 }, "CustomBrushEngine");
 
 /* ======================================================================
-   FILE ASAL: custombrush-stamp.js   (65 baris)   [381/490]
+   FILE ASAL: custombrush-stamp.js   (65 baris)   [382/491]
    ====================================================================== */
 /*
   custombrush-stamp.js
@@ -35344,7 +35554,7 @@ Modul.extend(CustomBrushEngine, "custombrush-stamp.js", {
 }, "CustomBrushEngine");
 
 /* ======================================================================
-   FILE ASAL: custombrush-import.js   (43 baris)   [382/490]
+   FILE ASAL: custombrush-import.js   (43 baris)   [383/491]
    ====================================================================== */
 /*
   custombrush-import.js
@@ -35391,7 +35601,7 @@ Modul.extend(CustomBrushEngine, "custombrush-import.js", {
 }, "CustomBrushEngine");
 
 /* ======================================================================
-   FILE ASAL: custombrush-storage.js   (48 baris)   [383/490]
+   FILE ASAL: custombrush-storage.js   (48 baris)   [384/491]
    ====================================================================== */
 /*
   custombrush-storage.js
@@ -35443,7 +35653,7 @@ Modul.extend(CustomBrushEngine, "custombrush-storage.js", {
 CustomBrushEngine._restoreFromStorage();
 
 /* ======================================================================
-   FILE ASAL: pattern.js   (34 baris)   [384/490]
+   FILE ASAL: pattern.js   (34 baris)   [385/491]
    ====================================================================== */
 /*
   pattern.js
@@ -35481,7 +35691,7 @@ const PatternEngine = {
 };
 
 /* ======================================================================
-   FILE ASAL: pattern-image.js   (56 baris)   [385/490]
+   FILE ASAL: pattern-image.js   (56 baris)   [386/491]
    ====================================================================== */
 /*
   pattern-image.js
@@ -35541,7 +35751,7 @@ Modul.extend(PatternEngine, "pattern-image.js", {
 }, "PatternEngine");
 
 /* ======================================================================
-   FILE ASAL: pattern-shape.js   (60 baris)   [386/490]
+   FILE ASAL: pattern-shape.js   (60 baris)   [387/491]
    ====================================================================== */
 /*
   pattern-shape.js
@@ -35605,7 +35815,7 @@ Modul.extend(PatternEngine, "pattern-shape.js", {
 }, "PatternEngine");
 
 /* ======================================================================
-   FILE ASAL: pattern-tile.js   (68 baris)   [387/490]
+   FILE ASAL: pattern-tile.js   (68 baris)   [388/491]
    ====================================================================== */
 /*
   pattern-tile.js
@@ -35677,7 +35887,7 @@ Modul.extend(PatternEngine, "pattern-tile.js", {
 }, "PatternEngine");
 
 /* ======================================================================
-   FILE ASAL: pattern-sample.js   (58 baris)   [388/490]
+   FILE ASAL: pattern-sample.js   (58 baris)   [389/491]
    ====================================================================== */
 /*
   pattern-sample.js
@@ -35739,7 +35949,7 @@ Modul.extend(PatternEngine, "pattern-sample.js", {
 }, "PatternEngine");
 ;
 /* ======================================================================
-   FILE ASAL: watercolorbrush-tile1.js   (134 baris)   [389/490]
+   FILE ASAL: watercolorbrush-tile1.js   (134 baris)   [390/491]
    ====================================================================== */
 /*
   watercolorbrush-tile1.js
@@ -35877,7 +36087,7 @@ Modul.extend(PatternEngine, "pattern-sample.js", {
 ].join(""));
 ;
 /* ======================================================================
-   FILE ASAL: watercolorbrush-tile2.js   (134 baris)   [390/490]
+   FILE ASAL: watercolorbrush-tile2.js   (134 baris)   [391/491]
    ====================================================================== */
 /*
   watercolorbrush-tile2.js
@@ -36015,7 +36225,7 @@ Modul.extend(PatternEngine, "pattern-sample.js", {
 ].join(""));
 ;
 /* ======================================================================
-   FILE ASAL: watercolorbrush-tile3.js   (134 baris)   [391/490]
+   FILE ASAL: watercolorbrush-tile3.js   (134 baris)   [392/491]
    ====================================================================== */
 /*
   watercolorbrush-tile3.js
@@ -36153,7 +36363,7 @@ Modul.extend(PatternEngine, "pattern-sample.js", {
 ].join(""));
 ;
 /* ======================================================================
-   FILE ASAL: watercolorbrush-tile4.js   (134 baris)   [392/490]
+   FILE ASAL: watercolorbrush-tile4.js   (134 baris)   [393/491]
    ====================================================================== */
 /*
   watercolorbrush-tile4.js
@@ -36291,7 +36501,7 @@ Modul.extend(PatternEngine, "pattern-sample.js", {
 ].join(""));
 ;
 /* ======================================================================
-   FILE ASAL: watercolorbrush-tile5.js   (134 baris)   [393/490]
+   FILE ASAL: watercolorbrush-tile5.js   (134 baris)   [394/491]
    ====================================================================== */
 /*
   watercolorbrush-tile5.js
@@ -36429,7 +36639,7 @@ Modul.extend(PatternEngine, "pattern-sample.js", {
 ].join(""));
 
 /* ======================================================================
-   FILE ASAL: watercolorbrush.js   (54 baris)   [394/490]
+   FILE ASAL: watercolorbrush.js   (54 baris)   [395/491]
    ====================================================================== */
 /*
   watercolorbrush.js
@@ -36487,7 +36697,7 @@ const WatercolorBrush = {
 };
 
 /* ======================================================================
-   FILE ASAL: watercolorbrush-edge.js   (45 baris)   [395/490]
+   FILE ASAL: watercolorbrush-edge.js   (45 baris)   [396/491]
    ====================================================================== */
 /*
   watercolorbrush-edge.js
@@ -36536,7 +36746,7 @@ Modul.extend(WatercolorBrush, "watercolorbrush-edge.js", {
 }, "WatercolorBrush");
 
 /* ======================================================================
-   FILE ASAL: watercolorbrush-cover.js   (47 baris)   [396/490]
+   FILE ASAL: watercolorbrush-cover.js   (47 baris)   [397/491]
    ====================================================================== */
 /*
   watercolorbrush-cover.js
@@ -36587,7 +36797,7 @@ Modul.extend(WatercolorBrush, "watercolorbrush-cover.js", {
 }, "WatercolorBrush");
 
 /* ======================================================================
-   FILE ASAL: watercolorbrush-color.js   (27 baris)   [397/490]
+   FILE ASAL: watercolorbrush-color.js   (27 baris)   [398/491]
    ====================================================================== */
 /*
   watercolorbrush-color.js
@@ -36618,7 +36828,7 @@ Modul.extend(WatercolorBrush, "watercolorbrush-color.js", {
 }, "WatercolorBrush");
 
 /* ======================================================================
-   FILE ASAL: watercolorbrush-paint.js   (61 baris)   [398/490]
+   FILE ASAL: watercolorbrush-paint.js   (61 baris)   [399/491]
    ====================================================================== */
 /*
   watercolorbrush-paint.js
@@ -36683,7 +36893,7 @@ Modul.extend(WatercolorBrush, "watercolorbrush-paint.js", {
 }, "WatercolorBrush");
 
 /* ======================================================================
-   FILE ASAL: watercolorbrush-shade.js   (100 baris)   [399/490]
+   FILE ASAL: watercolorbrush-shade.js   (100 baris)   [400/491]
    ====================================================================== */
 /*
   watercolorbrush-shade.js
@@ -36787,7 +36997,7 @@ Modul.extend(WatercolorBrush, "watercolorbrush-shade.js", {
 }, "WatercolorBrush");
 
 /* ======================================================================
-   FILE ASAL: watercolorbrush-segment.js   (41 baris)   [400/490]
+   FILE ASAL: watercolorbrush-segment.js   (41 baris)   [401/491]
    ====================================================================== */
 /*
   watercolorbrush-segment.js
@@ -36832,7 +37042,7 @@ Modul.extend(WatercolorBrush, "watercolorbrush-segment.js", {
 }, "WatercolorBrush");
 
 /* ======================================================================
-   FILE ASAL: watercolorbrush-stroke.js   (35 baris)   [401/490]
+   FILE ASAL: watercolorbrush-stroke.js   (35 baris)   [402/491]
    ====================================================================== */
 /*
   watercolorbrush-stroke.js
@@ -36871,7 +37081,7 @@ Modul.extend(WatercolorBrush, "watercolorbrush-stroke.js", {
 }, "WatercolorBrush");
 
 /* ======================================================================
-   FILE ASAL: watercolorbrush-texture.js   (52 baris)   [402/490]
+   FILE ASAL: watercolorbrush-texture.js   (52 baris)   [403/491]
    ====================================================================== */
 /*
   watercolorbrush-texture.js
@@ -36927,7 +37137,7 @@ Modul.extend(WatercolorBrush, "watercolorbrush-texture.js", {
 WatercolorBrush.init();
 
 /* ======================================================================
-   FILE ASAL: brushlibrary.js   (158 baris)   [403/490]
+   FILE ASAL: brushlibrary.js   (158 baris)   [404/491]
    ====================================================================== */
 /*
   brushlibrary.js
@@ -37089,7 +37299,7 @@ const BrushLibraryEngine = {
 };
 
 /* ======================================================================
-   FILE ASAL: brushlibrary-core.js   (81 baris)   [404/490]
+   FILE ASAL: brushlibrary-core.js   (81 baris)   [405/491]
    ====================================================================== */
 /*
   brushlibrary-core.js
@@ -37174,7 +37384,7 @@ Modul.extend(BrushLibraryEngine, "brushlibrary-core.js", {
 }, "BrushLibraryEngine");
 
 /* ======================================================================
-   FILE ASAL: brushlibrary-preview.js   (63 baris)   [405/490]
+   FILE ASAL: brushlibrary-preview.js   (63 baris)   [406/491]
    ====================================================================== */
 /*
   brushlibrary-preview.js
@@ -37241,7 +37451,7 @@ Modul.extend(BrushLibraryEngine, "brushlibrary-preview.js", {
 }, "BrushLibraryEngine");
 
 /* ======================================================================
-   FILE ASAL: brushlibrary-pencil.js   (112 baris)   [406/490]
+   FILE ASAL: brushlibrary-pencil.js   (112 baris)   [407/491]
    ====================================================================== */
 /*
   brushlibrary-pencil.js
@@ -37357,7 +37567,7 @@ Modul.extend(BrushLibraryEngine, "brushlibrary-pencil.js", {
 }, "BrushLibraryEngine");
 
 /* ======================================================================
-   FILE ASAL: brushlibrary-crayon.js   (120 baris)   [407/490]
+   FILE ASAL: brushlibrary-crayon.js   (120 baris)   [408/491]
    ====================================================================== */
 /*
   brushlibrary-crayon.js
@@ -37481,7 +37691,7 @@ Modul.extend(BrushLibraryEngine, "brushlibrary-crayon.js", {
 }, "BrushLibraryEngine");
 
 /* ======================================================================
-   FILE ASAL: brushlibrary-pen.js   (70 baris)   [408/490]
+   FILE ASAL: brushlibrary-pen.js   (70 baris)   [409/491]
    ====================================================================== */
 /*
   brushlibrary-pen.js
@@ -37555,7 +37765,7 @@ Modul.extend(BrushLibraryEngine, "brushlibrary-pen.js", {
 }, "BrushLibraryEngine");
 
 /* ======================================================================
-   FILE ASAL: brushlibrary-line.js   (92 baris)   [409/490]
+   FILE ASAL: brushlibrary-line.js   (92 baris)   [410/491]
    ====================================================================== */
 /*
   brushlibrary-line.js
@@ -37651,7 +37861,7 @@ Modul.extend(BrushLibraryEngine, "brushlibrary-line.js", {
 }, "BrushLibraryEngine");
 
 /* ======================================================================
-   FILE ASAL: brushlibrary-paint.js   (170 baris)   [410/490]
+   FILE ASAL: brushlibrary-paint.js   (170 baris)   [411/491]
    ====================================================================== */
 /*
   brushlibrary-paint.js
@@ -37825,7 +38035,7 @@ Modul.extend(BrushLibraryEngine, "brushlibrary-paint.js", {
 }, "BrushLibraryEngine");
 
 /* ======================================================================
-   FILE ASAL: brushlibrary-flat.js   (40 baris)   [411/490]
+   FILE ASAL: brushlibrary-flat.js   (40 baris)   [412/491]
    ====================================================================== */
 /*
   brushlibrary-flat.js
@@ -37869,7 +38079,7 @@ Modul.extend(BrushLibraryEngine, "brushlibrary-flat.js", {
 }, "BrushLibraryEngine");
 
 /* ======================================================================
-   FILE ASAL: brushlibrary-airbrush.js   (65 baris)   [412/490]
+   FILE ASAL: brushlibrary-airbrush.js   (65 baris)   [413/491]
    ====================================================================== */
 /*
   brushlibrary-airbrush.js
@@ -37938,7 +38148,7 @@ Modul.extend(BrushLibraryEngine, "brushlibrary-airbrush.js", {
 }, "BrushLibraryEngine");
 
 /* ======================================================================
-   FILE ASAL: brushlibrary-taper.js   (149 baris)   [413/490]
+   FILE ASAL: brushlibrary-taper.js   (149 baris)   [414/491]
    ====================================================================== */
 /*
   brushlibrary-taper.js
@@ -38091,7 +38301,7 @@ Modul.extend(BrushLibraryEngine, "brushlibrary-taper.js", {
 BrushLibraryEngine.loadTaper();
 
 /* ======================================================================
-   FILE ASAL: colorpanel.js   (61 baris)   [414/490]
+   FILE ASAL: colorpanel.js   (61 baris)   [415/491]
    ====================================================================== */
 /*
   colorpanel.js
@@ -38156,7 +38366,7 @@ const ColorPanel = {
 };
 
 /* ======================================================================
-   FILE ASAL: colorpanel-open.js   (22 baris)   [415/490]
+   FILE ASAL: colorpanel-open.js   (22 baris)   [416/491]
    ====================================================================== */
 /*
   colorpanel-open.js
@@ -38182,7 +38392,7 @@ Modul.extend(ColorPanel, "colorpanel-open.js", {
 }, "ColorPanel");
 
 /* ======================================================================
-   FILE ASAL: colorpanel-render.js   (79 baris)   [416/490]
+   FILE ASAL: colorpanel-render.js   (79 baris)   [417/491]
    ====================================================================== */
 /*
   colorpanel-render.js
@@ -38265,7 +38475,7 @@ Modul.extend(ColorPanel, "colorpanel-render.js", {
 }, "ColorPanel");
 
 /* ======================================================================
-   FILE ASAL: colorpanel-color.js   (116 baris)   [417/490]
+   FILE ASAL: colorpanel-color.js   (116 baris)   [418/491]
    ====================================================================== */
 /*
   colorpanel-color.js
@@ -38385,7 +38595,7 @@ Modul.extend(ColorPanel, "colorpanel-color.js", {
 }, "ColorPanel");
 
 /* ======================================================================
-   FILE ASAL: colorpanel-wheel.js   (133 baris)   [418/490]
+   FILE ASAL: colorpanel-wheel.js   (133 baris)   [419/491]
    ====================================================================== */
 /*
   colorpanel-wheel.js
@@ -38522,7 +38732,7 @@ Modul.extend(ColorPanel, "colorpanel-wheel.js", {
 }, "ColorPanel");
 
 /* ======================================================================
-   FILE ASAL: colorpanel-wheel-bind.js   (110 baris)   [419/490]
+   FILE ASAL: colorpanel-wheel-bind.js   (110 baris)   [420/491]
    ====================================================================== */
 /*
   colorpanel-wheel-bind.js
@@ -38636,7 +38846,7 @@ Modul.extend(ColorPanel, "colorpanel-wheel-bind.js", {
 }, "ColorPanel");
 
 /* ======================================================================
-   FILE ASAL: colorpanel-wheel-drag.js   (60 baris)   [420/490]
+   FILE ASAL: colorpanel-wheel-drag.js   (60 baris)   [421/491]
    ====================================================================== */
 /*
   colorpanel-wheel-drag.js
@@ -38700,7 +38910,7 @@ Modul.extend(ColorPanel, "colorpanel-wheel-drag.js", {
 }, "ColorPanel");
 
 /* ======================================================================
-   FILE ASAL: colorpanel-palette-store.js   (100 baris)   [421/490]
+   FILE ASAL: colorpanel-palette-store.js   (100 baris)   [422/491]
    ====================================================================== */
 /*
   colorpanel-palette-store.js
@@ -38804,7 +39014,7 @@ Modul.extend(ColorPanel, "colorpanel-palette-store.js", {
 }, "ColorPanel");
 
 /* ======================================================================
-   FILE ASAL: colorpanel-palette-ui.js   (173 baris)   [422/490]
+   FILE ASAL: colorpanel-palette-ui.js   (173 baris)   [423/491]
    ====================================================================== */
 /*
   colorpanel-palette-ui.js
@@ -38981,7 +39191,7 @@ Modul.extend(ColorPanel, "colorpanel-palette-ui.js", {
 }, "ColorPanel");
 
 /* ======================================================================
-   FILE ASAL: colorpanel-palette-menu.js   (71 baris)   [423/490]
+   FILE ASAL: colorpanel-palette-menu.js   (71 baris)   [424/491]
    ====================================================================== */
 /*
   colorpanel-palette-menu.js
@@ -39056,7 +39266,7 @@ Modul.extend(ColorPanel, "colorpanel-palette-menu.js", {
 }, "ColorPanel");
 
 /* ======================================================================
-   FILE ASAL: colorpanel-recent.js   (163 baris)   [424/490]
+   FILE ASAL: colorpanel-recent.js   (163 baris)   [425/491]
    ====================================================================== */
 /*
   colorpanel-recent.js
@@ -39223,7 +39433,7 @@ Modul.extend(ColorPanel, "colorpanel-recent.js", {
 }, "ColorPanel");
 
 /* ======================================================================
-   FILE ASAL: colorpanel-gradient.js   (79 baris)   [425/490]
+   FILE ASAL: colorpanel-gradient.js   (79 baris)   [426/491]
    ====================================================================== */
 /*
   colorpanel-gradient.js
@@ -39306,7 +39516,7 @@ Modul.extend(ColorPanel, "colorpanel-gradient.js", {
 }, "ColorPanel");
 
 /* ======================================================================
-   FILE ASAL: colorpanel-pattern.js   (137 baris)   [426/490]
+   FILE ASAL: colorpanel-pattern.js   (137 baris)   [427/491]
    ====================================================================== */
 /*
   colorpanel-pattern.js
@@ -39447,7 +39657,7 @@ Modul.extend(ColorPanel, "colorpanel-pattern.js", {
 }, "ColorPanel");
 
 /* ======================================================================
-   FILE ASAL: gradient.js   (89 baris)   [427/490]
+   FILE ASAL: gradient.js   (89 baris)   [428/491]
    ====================================================================== */
 /*
   gradient.js
@@ -39540,7 +39750,7 @@ const GradientEngine = {
 };
 
 /* ======================================================================
-   FILE ASAL: eyedropper.js   (45 baris)   [428/490]
+   FILE ASAL: eyedropper.js   (45 baris)   [429/491]
    ====================================================================== */
 /*
   eyedropper.js
@@ -39589,7 +39799,7 @@ const EyedropperEngine = {
 };
 
 /* ======================================================================
-   FILE ASAL: eyedropper-sample.js   (74 baris)   [429/490]
+   FILE ASAL: eyedropper-sample.js   (74 baris)   [430/491]
    ====================================================================== */
 /*
   eyedropper-sample.js
@@ -39667,7 +39877,7 @@ Modul.extend(EyedropperEngine, "eyedropper-sample.js", {
 }, "EyedropperEngine");
 
 /* ======================================================================
-   FILE ASAL: eyedropper-pointer.js   (52 baris)   [430/490]
+   FILE ASAL: eyedropper-pointer.js   (52 baris)   [431/491]
    ====================================================================== */
 /*
   eyedropper-pointer.js
@@ -39723,7 +39933,7 @@ Modul.extend(EyedropperEngine, "eyedropper-pointer.js", {
 }, "EyedropperEngine");
 
 /* ======================================================================
-   FILE ASAL: eyedropper-magnifier.js   (80 baris)   [431/490]
+   FILE ASAL: eyedropper-magnifier.js   (80 baris)   [432/491]
    ====================================================================== */
 /*
   eyedropper-magnifier.js
@@ -39807,7 +40017,7 @@ Modul.extend(EyedropperEngine, "eyedropper-magnifier.js", {
 }, "EyedropperEngine");
 
 /* ======================================================================
-   FILE ASAL: eyedropper-confirm.js   (33 baris)   [432/490]
+   FILE ASAL: eyedropper-confirm.js   (33 baris)   [433/491]
    ====================================================================== */
 /*
   eyedropper-confirm.js
@@ -39844,7 +40054,7 @@ Modul.extend(EyedropperEngine, "eyedropper-confirm.js", {
 }, "EyedropperEngine");
 
 /* ======================================================================
-   FILE ASAL: eyedropper-panel.js   (111 baris)   [433/490]
+   FILE ASAL: eyedropper-panel.js   (111 baris)   [434/491]
    ====================================================================== */
 /*
   eyedropper-panel.js
@@ -39959,7 +40169,7 @@ Modul.extend(EyedropperEngine, "eyedropper-panel.js", {
 }, "EyedropperEngine");
 
 /* ======================================================================
-   FILE ASAL: project.js   (36 baris)   [434/490]
+   FILE ASAL: project.js   (36 baris)   [435/491]
    ====================================================================== */
 /*
   project.js
@@ -39999,7 +40209,7 @@ const ProjectStore = {
 };
 
 /* ======================================================================
-   FILE ASAL: project-struct.js   (76 baris)   [435/490]
+   FILE ASAL: project-struct.js   (76 baris)   [436/491]
    ====================================================================== */
 /*
   project-struct.js
@@ -40079,7 +40289,7 @@ function createEmptyLayer({ type = "raster", name = "Layer", animationMode = "ge
 }
 
 /* ======================================================================
-   FILE ASAL: project-db.js   (162 baris)   [436/490]
+   FILE ASAL: project-db.js   (162 baris)   [437/491]
    ====================================================================== */
 /*
   project-db.js
@@ -40245,7 +40455,7 @@ async function deleteProjectFromDB(projectId) {
 }
 
 /* ======================================================================
-   FILE ASAL: project-blob.js   (93 baris)   [437/490]
+   FILE ASAL: project-blob.js   (93 baris)   [438/491]
    ====================================================================== */
 /*
   project-blob.js
@@ -40342,7 +40552,7 @@ async function projectToPlainForShare(project) {
 }
 
 /* ======================================================================
-   FILE ASAL: project-open.js   (96 baris)   [438/490]
+   FILE ASAL: project-open.js   (96 baris)   [439/491]
    ====================================================================== */
 /*
   project-open.js
@@ -40442,7 +40652,7 @@ Modul.extend(ProjectStore, "project-open.js", {
 }, "ProjectStore");
 
 /* ======================================================================
-   FILE ASAL: project-access.js   (50 baris)   [439/490]
+   FILE ASAL: project-access.js   (50 baris)   [440/491]
    ====================================================================== */
 /*
   project-access.js
@@ -40496,7 +40706,7 @@ Modul.extend(ProjectStore, "project-access.js", {
 }, "ProjectStore");
 
 /* ======================================================================
-   FILE ASAL: project-save.js   (44 baris)   [440/490]
+   FILE ASAL: project-save.js   (44 baris)   [441/491]
    ====================================================================== */
 /*
   project-save.js
@@ -40544,7 +40754,7 @@ Modul.extend(ProjectStore, "project-save.js", {
 }, "ProjectStore");
 
 /* ======================================================================
-   FILE ASAL: project-layers.js   (231 baris)   [441/490]
+   FILE ASAL: project-layers.js   (231 baris)   [442/491]
    ====================================================================== */
 /*
   project-layers.js
@@ -40779,7 +40989,7 @@ Modul.extend(ProjectStore, "project-layers.js", {
 }, "ProjectStore");
 
 /* ======================================================================
-   FILE ASAL: project-settings.js   (143 baris)   [442/490]
+   FILE ASAL: project-settings.js   (143 baris)   [443/491]
    ====================================================================== */
 /*
   project-settings.js
@@ -40926,7 +41136,7 @@ Modul.extend(ProjectStore, "project-settings.js", {
 }, "ProjectStore");
 
 /* ======================================================================
-   FILE ASAL: project-autosave.js   (168 baris)   [443/490]
+   FILE ASAL: project-autosave.js   (168 baris)   [444/491]
    ====================================================================== */
 /*
   project-autosave.js
@@ -41098,7 +41308,7 @@ function showAutosaveFailedToast() {
 }
 
 /* ======================================================================
-   FILE ASAL: backup.js   (70 baris)   [444/490]
+   FILE ASAL: backup.js   (70 baris)   [445/491]
    ====================================================================== */
 /*
   backup.js
@@ -41172,7 +41382,7 @@ const ProjectBackup = {
 };
 
 /* ======================================================================
-   FILE ASAL: backup-export.js   (130 baris)   [445/490]
+   FILE ASAL: backup-export.js   (130 baris)   [446/491]
    ====================================================================== */
 /*
   backup-export.js
@@ -41306,7 +41516,7 @@ Modul.extend(ProjectBackup, "backup-export.js", {
 }, "ProjectBackup");
 
 /* ======================================================================
-   FILE ASAL: backup-import.js   (160 baris)   [446/490]
+   FILE ASAL: backup-import.js   (160 baris)   [447/491]
    ====================================================================== */
 /*
   backup-import.js
@@ -41470,7 +41680,7 @@ Modul.extend(ProjectBackup, "backup-import.js", {
 }, "ProjectBackup");
 
 /* ======================================================================
-   FILE ASAL: backup-validate.js   (67 baris)   [447/490]
+   FILE ASAL: backup-validate.js   (67 baris)   [448/491]
    ====================================================================== */
 /*
   backup-validate.js
@@ -41541,7 +41751,7 @@ Modul.extend(ProjectBackup, "backup-validate.js", {
 }, "ProjectBackup");
 
 /* ======================================================================
-   FILE ASAL: backup-ui.js   (27 baris)   [448/490]
+   FILE ASAL: backup-ui.js   (27 baris)   [449/491]
    ====================================================================== */
 /*
   backup-ui.js
@@ -41572,7 +41782,7 @@ Modul.extend(ProjectBackup, "backup-ui.js", {
 }, "ProjectBackup");
 
 /* ======================================================================
-   FILE ASAL: galeri.js   (58 baris)   [449/490]
+   FILE ASAL: galeri.js   (58 baris)   [450/491]
    ====================================================================== */
 /*
   galeri.js
@@ -41634,7 +41844,7 @@ const Gallery = {
 // Gallery.init() dipanggil dari splash.js sesudah splash screen selesai
 
 /* ======================================================================
-   FILE ASAL: galeri-list.js   (175 baris)   [450/490]
+   FILE ASAL: galeri-list.js   (175 baris)   [451/491]
    ====================================================================== */
 /*
   galeri-list.js
@@ -41813,7 +42023,7 @@ Modul.extend(Gallery, "galeri-list.js", {
 }, "Gallery");
 
 /* ======================================================================
-   FILE ASAL: galeri-filter.js   (58 baris)   [451/490]
+   FILE ASAL: galeri-filter.js   (58 baris)   [452/491]
    ====================================================================== */
 /*
   galeri-filter.js
@@ -41875,7 +42085,7 @@ Modul.extend(Gallery, "galeri-filter.js", {
 }, "Gallery");
 
 /* ======================================================================
-   FILE ASAL: galeri-format.js   (51 baris)   [452/490]
+   FILE ASAL: galeri-format.js   (51 baris)   [453/491]
    ====================================================================== */
 /*
   galeri-format.js
@@ -41930,7 +42140,7 @@ Modul.extend(Gallery, "galeri-format.js", {
 }, "Gallery");
 
 /* ======================================================================
-   FILE ASAL: galeri-card.js   (73 baris)   [453/490]
+   FILE ASAL: galeri-card.js   (73 baris)   [454/491]
    ====================================================================== */
 /*
   galeri-card.js
@@ -42007,7 +42217,7 @@ Modul.extend(Gallery, "galeri-card.js", {
 }, "Gallery");
 
 /* ======================================================================
-   FILE ASAL: galeri-cardbind.js   (126 baris)   [454/490]
+   FILE ASAL: galeri-cardbind.js   (126 baris)   [455/491]
    ====================================================================== */
 /*
   galeri-cardbind.js
@@ -42137,7 +42347,7 @@ Modul.extend(Gallery, "galeri-cardbind.js", {
 }, "Gallery");
 
 /* ======================================================================
-   FILE ASAL: galeri-select.js   (96 baris)   [455/490]
+   FILE ASAL: galeri-select.js   (96 baris)   [456/491]
    ====================================================================== */
 /*
   galeri-select.js
@@ -42237,7 +42447,7 @@ Modul.extend(Gallery, "galeri-select.js", {
 }, "Gallery");
 
 /* ======================================================================
-   FILE ASAL: galeri-dialog-new.js   (112 baris)   [456/490]
+   FILE ASAL: galeri-dialog-new.js   (112 baris)   [457/491]
    ====================================================================== */
 /*
   galeri-dialog-new.js
@@ -42353,7 +42563,7 @@ Modul.extend(Gallery, "galeri-dialog-new.js", {
 }, "Gallery");
 
 /* ======================================================================
-   FILE ASAL: galeri-dialog-settings.js   (144 baris)   [457/490]
+   FILE ASAL: galeri-dialog-settings.js   (144 baris)   [458/491]
    ====================================================================== */
 /*
   galeri-dialog-settings.js
@@ -42501,7 +42711,7 @@ Modul.extend(Gallery, "galeri-dialog-settings.js", {
 }, "Gallery");
 
 /* ======================================================================
-   FILE ASAL: galeri-open.js   (42 baris)   [458/490]
+   FILE ASAL: galeri-open.js   (42 baris)   [459/491]
    ====================================================================== */
 /*
   galeri-open.js
@@ -42547,7 +42757,7 @@ Modul.extend(Gallery, "galeri-open.js", {
 }, "Gallery");
 
 /* ======================================================================
-   FILE ASAL: galeri-icons.js   (41 baris)   [459/490]
+   FILE ASAL: galeri-icons.js   (41 baris)   [460/491]
    ====================================================================== */
 /*
   galeri-icons.js
@@ -42592,7 +42802,7 @@ Modul.extend(Gallery, "galeri-icons.js", {
 }, "Gallery");
 
 /* ======================================================================
-   FILE ASAL: storage.js   (157 baris)   [460/490]
+   FILE ASAL: storage.js   (157 baris)   [461/491]
    ====================================================================== */
 /*
   storage.js
@@ -42753,7 +42963,7 @@ StorageGuard.init();
 StorageGuard.registerServiceWorker();
 
 /* ======================================================================
-   FILE ASAL: supabaseclient.js   (19 baris)   [461/490]
+   FILE ASAL: supabaseclient.js   (19 baris)   [462/491]
    ====================================================================== */
 /*
   supabaseClient.js
@@ -42776,7 +42986,7 @@ if (!SupabaseClient) {
 }
 
 /* ======================================================================
-   FILE ASAL: demoshare.js   (181 baris)   [462/490]
+   FILE ASAL: demoshare.js   (181 baris)   [463/491]
    ====================================================================== */
 /*
   demoshare.js
@@ -42961,7 +43171,7 @@ const DemoShare = {
 document.addEventListener("DOMContentLoaded", () => DemoShare.init());
 
 /* ======================================================================
-   FILE ASAL: splash.js   (53 baris)   [463/490]
+   FILE ASAL: splash.js   (53 baris)   [464/491]
    ====================================================================== */
 /*
   splash.js
@@ -43018,7 +43228,7 @@ document.addEventListener("DOMContentLoaded", () => {
 });
 
 /* ======================================================================
-   FILE ASAL: ruler.js   (43 baris)   [464/490]
+   FILE ASAL: ruler.js   (43 baris)   [465/491]
    ====================================================================== */
 /*
   ruler.js
@@ -43065,7 +43275,7 @@ const RulerEngine = {
 };
 
 /* ======================================================================
-   FILE ASAL: ruler-buttons.js   (110 baris)   [465/490]
+   FILE ASAL: ruler-buttons.js   (110 baris)   [466/491]
    ====================================================================== */
 /*
   ruler-buttons.js
@@ -43179,7 +43389,7 @@ Modul.extend(RulerEngine, "ruler-buttons.js", {
 }, "RulerEngine");
 
 /* ======================================================================
-   FILE ASAL: ruler-pointer.js   (121 baris)   [466/490]
+   FILE ASAL: ruler-pointer.js   (121 baris)   [467/491]
    ====================================================================== */
 /*
   ruler-pointer.js
@@ -43304,7 +43514,7 @@ Modul.extend(RulerEngine, "ruler-pointer.js", {
 }, "RulerEngine");
 
 /* ======================================================================
-   FILE ASAL: ruler-hit.js   (149 baris)   [467/490]
+   FILE ASAL: ruler-hit.js   (149 baris)   [468/491]
    ====================================================================== */
 /*
   ruler-hit.js
@@ -43457,7 +43667,7 @@ Modul.extend(RulerEngine, "ruler-hit.js", {
 }, "RulerEngine");
 
 /* ======================================================================
-   FILE ASAL: ruler-drag.js   (126 baris)   [468/490]
+   FILE ASAL: ruler-drag.js   (126 baris)   [469/491]
    ====================================================================== */
 /*
   ruler-drag.js
@@ -43587,7 +43797,7 @@ Modul.extend(RulerEngine, "ruler-drag.js", {
 }, "RulerEngine");
 
 /* ======================================================================
-   FILE ASAL: ruler-snap.js   (64 baris)   [469/490]
+   FILE ASAL: ruler-snap.js   (64 baris)   [470/491]
    ====================================================================== */
 /*
   ruler-snap.js
@@ -43655,7 +43865,7 @@ Modul.extend(RulerEngine, "ruler-snap.js", {
 }, "RulerEngine");
 
 /* ======================================================================
-   FILE ASAL: ruler-snap-shape.js   (138 baris)   [470/490]
+   FILE ASAL: ruler-snap-shape.js   (138 baris)   [471/491]
    ====================================================================== */
 /*
   ruler-snap-shape.js
@@ -43797,7 +44007,7 @@ Modul.extend(RulerEngine, "ruler-snap-shape.js", {
 }, "RulerEngine");
 
 /* ======================================================================
-   FILE ASAL: ruler-overlay.js   (110 baris)   [471/490]
+   FILE ASAL: ruler-overlay.js   (110 baris)   [472/491]
    ====================================================================== */
 /*
   ruler-overlay.js
@@ -43911,7 +44121,7 @@ Modul.extend(RulerEngine, "ruler-overlay.js", {
 }, "RulerEngine");
 
 /* ======================================================================
-   FILE ASAL: image-place.js   (66 baris)   [472/490]
+   FILE ASAL: image-place.js   (66 baris)   [473/491]
    ====================================================================== */
 /*
   image-place.js
@@ -43981,7 +44191,7 @@ const ImagePlaceEngine = {
 };
 
 /* ======================================================================
-   FILE ASAL: image-place-start.js   (84 baris)   [473/490]
+   FILE ASAL: image-place-start.js   (84 baris)   [474/491]
    ====================================================================== */
 /*
   image-place-start.js
@@ -44069,7 +44279,7 @@ Modul.extend(ImagePlaceEngine, "image-place-start.js", {
 }, "ImagePlaceEngine");
 
 /* ======================================================================
-   FILE ASAL: image-place-pointer.js   (125 baris)   [474/490]
+   FILE ASAL: image-place-pointer.js   (125 baris)   [475/491]
    ====================================================================== */
 /*
   image-place-pointer.js
@@ -44198,7 +44408,7 @@ Modul.extend(ImagePlaceEngine, "image-place-pointer.js", {
 }, "ImagePlaceEngine");
 
 /* ======================================================================
-   FILE ASAL: image-place-finish.js   (99 baris)   [475/490]
+   FILE ASAL: image-place-finish.js   (99 baris)   [476/491]
    ====================================================================== */
 /*
   image-place-finish.js
@@ -44301,7 +44511,7 @@ Modul.extend(ImagePlaceEngine, "image-place-finish.js", {
 }, "ImagePlaceEngine");
 
 /* ======================================================================
-   FILE ASAL: image-place-overlay.js   (92 baris)   [476/490]
+   FILE ASAL: image-place-overlay.js   (92 baris)   [477/491]
    ====================================================================== */
 /*
   image-place-overlay.js
@@ -44397,7 +44607,7 @@ Modul.extend(ImagePlaceEngine, "image-place-overlay.js", {
 }, "ImagePlaceEngine");
 
 /* ======================================================================
-   FILE ASAL: text.js   (65 baris)   [477/490]
+   FILE ASAL: text.js   (65 baris)   [478/491]
    ====================================================================== */
 /*
   text.js
@@ -44466,7 +44676,7 @@ const TextEngine = {
 };
 
 /* ======================================================================
-   FILE ASAL: text-modal.js   (53 baris)   [478/490]
+   FILE ASAL: text-modal.js   (53 baris)   [479/491]
    ====================================================================== */
 /*
   text-modal.js
@@ -44523,7 +44733,7 @@ Modul.extend(TextEngine, "text-modal.js", {
 });
 
 /* ======================================================================
-   FILE ASAL: text-modal-view.js   (50 baris)   [479/490]
+   FILE ASAL: text-modal-view.js   (50 baris)   [480/491]
    ====================================================================== */
 /*
   text-modal-view.js
@@ -44577,7 +44787,7 @@ Modul.extend(TextEngine, "text-modal-view.js", {
 });
 
 /* ======================================================================
-   FILE ASAL: text-modal-options.js   (49 baris)   [480/490]
+   FILE ASAL: text-modal-options.js   (49 baris)   [481/491]
    ====================================================================== */
 /*
   text-modal-options.js
@@ -44630,7 +44840,7 @@ Modul.extend(TextEngine, "text-modal-options.js", {
 });
 
 /* ======================================================================
-   FILE ASAL: text-modal-footer.js   (39 baris)   [481/490]
+   FILE ASAL: text-modal-footer.js   (39 baris)   [482/491]
    ====================================================================== */
 /*
   text-modal-footer.js
@@ -44673,7 +44883,7 @@ Modul.extend(TextEngine, "text-modal-footer.js", {
 });
 
 /* ======================================================================
-   FILE ASAL: text-color.js   (39 baris)   [482/490]
+   FILE ASAL: text-color.js   (39 baris)   [483/491]
    ====================================================================== */
 /*
   text-color.js
@@ -44716,7 +44926,7 @@ Modul.extend(TextEngine, "text-color.js", {
 });
 
 /* ======================================================================
-   FILE ASAL: text-confirm.js   (69 baris)   [483/490]
+   FILE ASAL: text-confirm.js   (69 baris)   [484/491]
    ====================================================================== */
 /*
   text-confirm.js
@@ -44789,7 +44999,7 @@ Modul.extend(TextEngine, "text-confirm.js", {
 });
 
 /* ======================================================================
-   FILE ASAL: text-effects.js   (57 baris)   [484/490]
+   FILE ASAL: text-effects.js   (57 baris)   [485/491]
    ====================================================================== */
 /*
   text-effects.js
@@ -44850,7 +45060,7 @@ Modul.extend(TextEngine, "text-effects.js", {
 });
 
 /* ======================================================================
-   FILE ASAL: editor.js   (36 baris)   [485/490]
+   FILE ASAL: editor.js   (36 baris)   [486/491]
    ====================================================================== */
 /*
   editor.js
@@ -44890,7 +45100,7 @@ const EditorPage = {
 };
 
 /* ======================================================================
-   FILE ASAL: editor-render.js   (28 baris)   [486/490]
+   FILE ASAL: editor-render.js   (28 baris)   [487/491]
    ====================================================================== */
 /*
   editor-render.js
@@ -44922,7 +45132,7 @@ Modul.extend(EditorPage, "editor-render.js", {
 });
 
 /* ======================================================================
-   FILE ASAL: editor-layout.js   (43 baris)   [487/490]
+   FILE ASAL: editor-layout.js   (43 baris)   [488/491]
    ====================================================================== */
 /*
   editor-layout.js
@@ -44969,7 +45179,7 @@ Modul.extend(EditorPage, "editor-layout.js", {
 });
 
 /* ======================================================================
-   FILE ASAL: editor-panels.js   (34 baris)   [488/490]
+   FILE ASAL: editor-panels.js   (34 baris)   [489/491]
    ====================================================================== */
 /*
   editor-panels.js
@@ -45007,7 +45217,7 @@ Modul.extend(EditorPage, "editor-panels.js", {
 });
 
 /* ======================================================================
-   FILE ASAL: editor-timeline-height.js   (31 baris)   [489/490]
+   FILE ASAL: editor-timeline-height.js   (31 baris)   [490/491]
    ====================================================================== */
 /*
   editor-timeline-height.js
@@ -45042,7 +45252,7 @@ Modul.extend(EditorPage, "editor-timeline-height.js", {
 });
 
 /* ======================================================================
-   FILE ASAL: editor-floating.js   (31 baris)   [490/490]
+   FILE ASAL: editor-floating.js   (31 baris)   [491/491]
    ====================================================================== */
 /*
   editor-floating.js

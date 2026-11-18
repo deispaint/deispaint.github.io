@@ -10,7 +10,7 @@
   Daftar PRECACHE harus cocok dengan <link>/<script> di index.html (gaya.css, kerangka.js, aplikasi.js).
 */
 const CACHE_PREFIX = "animasi2d-static-";
-const CACHE_VERSION = "v120";
+const CACHE_VERSION = "v121";
 const CACHE_NAME = CACHE_PREFIX + CACHE_VERSION;
 
 const PRECACHE = [
